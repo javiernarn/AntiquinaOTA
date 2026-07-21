@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # OJT Logbook — Opol Community College
 
 A time tracker for OJT hours. Pure React, no backend server, no API of its
@@ -110,3 +111,6 @@ you back to `/login`.
 - Use **Export CSV** in the logbook to back up or submit your hours.
 - Required hours defaults to 486 — change it in the app to match your
   program's actual requirement.
+=======
+# AntiquinaOTA
+>>>>>>> 588b771b804f85e7eb7c674a1e0ab8fa01c916dd
