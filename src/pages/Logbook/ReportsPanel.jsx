@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
-import { Sun, Sunset } from "lucide-react";
-import { formatHours, hoursBetween } from "../../utils/time";
+import { Sun, Sunset, Moon, Users } from "lucide-react";
+import { formatHours, hoursBetween, formatTime12, formatDateReport } from "../../utils/time";
 
 const CATEGORY_META = {
   regular: { label: "Regular", swatch: "var(--brass)" },
@@ -37,13 +37,35 @@ export default function ReportsPanel({ entries, clients }) {
   const dayPart = useMemo(() => {
     let morning = 0;
     let afternoon = 0;
+    let evening = 0;
     for (const e of entries) {
       if (e.amIn && e.amOut) morning += hoursBetween(e.amIn, e.amOut);
       if (e.pmIn && e.pmOut) afternoon += hoursBetween(e.pmIn, e.pmOut);
+      if (e.evIn && e.evOut) evening += hoursBetween(e.evIn, e.evOut);
     }
-    return { morning, afternoon };
+    return { morning, afternoon, evening };
   }, [entries]);
-  const maxDayPart = Math.max(1, dayPart.morning, dayPart.afternoon);
+  const maxDayPart = Math.max(1, dayPart.morning, dayPart.afternoon, dayPart.evening);
+
+  // Chronological (newest-first) breakdown of every entry — exact date,
+  // weekday, and the precise time range for whichever segment(s) (Morning /
+  // Afternoon / Evening) that entry actually covers, based on its shift
+  // coverage. This is the "detailed report" view: what, when, and how long.
+  const detailedLog = useMemo(() => {
+    return entries
+      .slice()
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((e) => {
+        const segments = [];
+        if (e.amIn && e.amOut)
+          segments.push({ key: "am", label: "Morning", Icon: Sun, range: `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}`, hours: hoursBetween(e.amIn, e.amOut) });
+        if (e.pmIn && e.pmOut)
+          segments.push({ key: "pm", label: "Afternoon", Icon: Sunset, range: `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}`, hours: hoursBetween(e.pmIn, e.pmOut) });
+        if (e.evIn && e.evOut)
+          segments.push({ key: "ev", label: "Evening", Icon: Moon, range: `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}`, hours: hoursBetween(e.evIn, e.evOut) });
+        return { ...e, segments };
+      });
+  }, [entries]);
 
   if (entries.length === 0) {
     return (
@@ -56,7 +78,7 @@ export default function ReportsPanel({ entries, clients }) {
   return (
     <div className="reports-grid">
       <div className="report-card">
-        <h3>Morning vs. afternoon hours</h3>
+        <h3>Morning vs. afternoon vs. evening hours</h3>
         <div className="bar-list">
           <div className="bar-row">
             <div className="bar-row-head">
@@ -74,6 +96,15 @@ export default function ReportsPanel({ entries, clients }) {
             </div>
             <div className="bar-track">
               <div className="bar-fill" style={{ width: `${(dayPart.afternoon / maxDayPart) * 100}%`, background: "var(--evening)" }} />
+            </div>
+          </div>
+          <div className="bar-row">
+            <div className="bar-row-head">
+              <span className="bar-name"><Moon size={13} /> Evening (overtime / late coverage)</span>
+              <span className="bar-value">{formatHours(dayPart.evening)}</span>
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill" style={{ width: `${(dayPart.evening / maxDayPart) * 100}%`, background: "var(--rust)" }} />
             </div>
           </div>
         </div>
@@ -126,6 +157,35 @@ export default function ReportsPanel({ entries, clients }) {
         <div className="report-total">
           <span>Total logged</span>
           <strong>{formatHours(grandTotal)}</strong>
+        </div>
+      </div>
+
+      <div className="report-card report-card--wide">
+        <h3>Detailed duty log</h3>
+        <p className="report-card-sub">
+          Every entry, most recent first — exact date, weekday, and the precise time range for each shift-coverage segment logged.
+        </p>
+        <div className="timeline-list">
+          {detailedLog.map((e) => (
+            <div className="timeline-item" key={e.id}>
+              <div className="timeline-head">
+                <span className="timeline-date">{formatDateReport(e.date)}</span>
+                <span className={`tag tag-${e.category}`}>{CATEGORY_META[e.category].label}</span>
+              </div>
+              <div className="timeline-segs">
+                {e.segments.map((s) => (
+                  <span className="timeline-seg" key={s.key}>
+                    <s.Icon size={12} /> {s.label}: {s.range} <em>({formatHours(s.hours)})</em>
+                  </span>
+                ))}
+              </div>
+              <div className="timeline-meta">
+                <span className="timeline-client"><Users size={11} /> {clientName(e.client)}</span>
+                <span className="timeline-total">Total for the day: {formatHours(e.hours)}</span>
+              </div>
+              {e.task && <div className="timeline-task">“{e.task}”</div>}
+            </div>
+          ))}
         </div>
       </div>
     </div>

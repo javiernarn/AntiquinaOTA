@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, FileDown, LogOut, Play, Square, X, Users, Sun, Sunset } from "lucide-react";
+import { Plus, Trash2, FileDown, LogOut, Play, Square, X, Users, Sun, Sunset, Moon, Pencil, XCircle } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../context/NotificationContext";
 import { useLiveClock } from "../../hooks/useLiveClock";
@@ -23,6 +23,9 @@ import {
   elapsedMsSince,
   formatDuration,
   msToHours,
+  isFutureDate,
+  isFutureTime,
+  rangesOverlap,
 } from "../../utils/time";
 import "./logbook.css";
 
@@ -37,6 +40,27 @@ const CATEGORIES = [
 ];
 
 const categoryLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || "Regular";
+
+// Shift-coverage options for the manual entry form. Each maps to a set of
+// segments (Morning / Afternoon / Evening) the draft form will show, plus a
+// short label used on the "Add ___" button so it's obvious what's about to
+// be saved. "Evening" and "Afternoon → Evening" only surface once the shift
+// type is Evening or Overtime — a Regular shift has no evening segment.
+const COVERAGE_META = {
+  full: { label: "Whole day", short: "Whole Day", icon: null },
+  am: { label: "Morning only", short: "Morning", icon: Sun },
+  pm: { label: "Afternoon only", short: "Afternoon", icon: Sunset },
+  ev: { label: "Evening only", short: "Evening", icon: Moon },
+  pmev: { label: "Afternoon → Evening", short: "Afternoon–Evening", icon: Moon },
+};
+
+function coverageOptionsFor(category) {
+  if (category === "evening") return ["ev", "pmev"];
+  if (category === "overtime") return ["full", "am", "pm", "ev", "pmev"];
+  return ["full", "am", "pm"];
+}
+
+const EVENING_STARTS_AT = 17 * 60; // 5:00 PM, in minutes — when "it's already evening"
 
 function initialsOf(name) {
   if (!name) return "OJ";
@@ -57,16 +81,29 @@ const emptyDraft = () => ({
   amOut: "12:00",
   pmIn: "13:00",
   pmOut: "17:00",
+  evIn: "",
+  evOut: "",
   client: "",
   category: "regular",
   task: "",
 });
 
-// Total hours across the morning + afternoon segments of an entry-like object.
-function segmentHours({ amIn, amOut, pmIn, pmOut }) {
+// Total hours across the morning + afternoon + evening segments of an entry-like object.
+function segmentHours({ amIn, amOut, pmIn, pmOut, evIn, evOut }) {
   const am = amIn && amOut ? hoursBetween(amIn, amOut) : 0;
   const pm = pmIn && pmOut ? hoursBetween(pmIn, pmOut) : 0;
-  return Math.round((am + pm) * 100) / 100;
+  const ev = evIn && evOut ? hoursBetween(evIn, evOut) : 0;
+  return Math.round((am + pm + ev) * 100) / 100;
+}
+
+// The list of (label, start, end)-in-minutes segments a draft/entry actually
+// fills in — used both to render the ledger and to check for overlaps.
+function draftSegments(d) {
+  const segs = [];
+  if (d.amIn && d.amOut) segs.push({ label: "Morning", start: toMinutes(d.amIn), end: toMinutes(d.amOut) });
+  if (d.pmIn && d.pmOut) segs.push({ label: "Afternoon", start: toMinutes(d.pmIn), end: toMinutes(d.pmOut) });
+  if (d.evIn && d.evOut) segs.push({ label: "Evening", start: toMinutes(d.evIn), end: toMinutes(d.evOut) });
+  return segs;
 }
 
 export default function LogbookPage() {
@@ -86,8 +123,9 @@ export default function LogbookPage() {
   const [saveState, setSaveState] = useState("idle");
   const [newClientName, setNewClientName] = useState("");
   const [exporting, setExporting] = useState(false);
-  const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" — which segment(s) this manual entry covers
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" | "ev" | "pmev" — which segment(s) this manual entry covers
+  const [editingId, setEditingId] = useState(null); // id of the entry currently being edited, or null when adding a new one
+  const [confirmDialog, setConfirmDialog] = useState(null); // { kind: "entry" | "client", id }
 
   const [activeSession, setActiveSession] = useState(() => getStorage(SESSION_KEY));
   const [sessionClient, setSessionClient] = useState("");
@@ -251,18 +289,21 @@ export default function LogbookPage() {
     }
 
     // A clock-in/out session is one continuous stretch, so we file it under
-    // whichever half of the day it started in (before noon = morning,
-    // otherwise afternoon) so it lines up with the Morning/Afternoon columns
-    // used for manually-added days.
-    const startedBeforeNoon = (toMinutes(activeSession.startedClock) ?? 0) < 12 * 60;
+    // whichever segment of the day it started in — Morning (before noon),
+    // Afternoon (noon–5pm), or Evening (5pm onward) — so it lines up with
+    // the Morning/Afternoon/Evening columns used for manually-added days.
+    const startedMinutes = toMinutes(activeSession.startedClock) ?? 0;
+    const startedSeg = startedMinutes >= EVENING_STARTS_AT ? "ev" : startedMinutes >= 12 * 60 ? "pm" : "am";
     const clockOutTime = nowClock();
     const entry = {
       id: uid(),
       date: activeSession.startedDate,
-      amIn: startedBeforeNoon ? activeSession.startedClock : "",
-      amOut: startedBeforeNoon ? clockOutTime : "",
-      pmIn: startedBeforeNoon ? "" : activeSession.startedClock,
-      pmOut: startedBeforeNoon ? "" : clockOutTime,
+      amIn: startedSeg === "am" ? activeSession.startedClock : "",
+      amOut: startedSeg === "am" ? clockOutTime : "",
+      pmIn: startedSeg === "pm" ? activeSession.startedClock : "",
+      pmOut: startedSeg === "pm" ? clockOutTime : "",
+      evIn: startedSeg === "ev" ? activeSession.startedClock : "",
+      evOut: startedSeg === "ev" ? clockOutTime : "",
       client: activeSession.client,
       category: activeSession.category,
       hours: hrs,
@@ -282,48 +323,157 @@ export default function LogbookPage() {
     });
   }
 
-  // Switches which half(s) of the day the manual-entry form captures.
+  // Switches which segment(s) of the day the manual-entry form captures.
   // Clears the fields for whichever segment doesn't apply, instead of
   // leaving stale default times sitting in a slot the client doesn't use.
   function setShiftMode(mode) {
     setDraftMode(mode);
     setDraft((d) => ({
       ...d,
-      amIn: mode === "pm" ? "" : d.amIn || "08:00",
-      amOut: mode === "pm" ? "" : d.amOut || "12:00",
-      pmIn: mode === "am" ? "" : d.pmIn || "13:00",
-      pmOut: mode === "am" ? "" : d.pmOut || "17:00",
+      amIn: mode === "full" || mode === "am" ? d.amIn || "08:00" : "",
+      amOut: mode === "full" || mode === "am" ? d.amOut || "12:00" : "",
+      pmIn: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmIn || "13:00" : "",
+      pmOut: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmOut || "17:00" : "",
+      evIn: mode === "ev" || mode === "pmev" ? d.evIn || "17:00" : "",
+      evOut: mode === "ev" || mode === "pmev" ? d.evOut || "20:00" : "",
     }));
   }
 
-  function addEntry() {
-    if (!draft.date) return;
-    const hasAM = draft.amIn && draft.amOut;
-    const hasPM = draft.pmIn && draft.pmOut;
-    if (!hasAM && !hasPM) return;
-    const hrs = segmentHours(draft);
-    if (hrs <= 0) return;
-    setEntries((prev) =>
-      [
-        ...prev,
-        {
-          id: uid(),
-          ...draft,
-          amIn: hasAM ? draft.amIn : "",
-          amOut: hasAM ? draft.amOut : "",
-          pmIn: hasPM ? draft.pmIn : "",
-          pmOut: hasPM ? draft.pmOut : "",
-          client: draft.client || null,
-          hours: hrs,
-        },
-      ].sort((a, b) => a.date.localeCompare(b.date))
-    );
+  // Shift type drives which coverage options are even available (Evening /
+  // Afternoon → Evening only make sense for Evening or Overtime shifts). If
+  // it's already past 5pm and someone picks Overtime (or Evening) while the
+  // form is still on the "Whole day" default, nudge the coverage to
+  // Afternoon → Evening automatically, since a whole day can't have already
+  // happened. Switching back to Regular drops any evening-only coverage.
+  function handleCategoryChange(nextCategory) {
+    setDraft((d) => ({ ...d, category: nextCategory }));
+    const eveningCapable = nextCategory === "overtime" || nextCategory === "evening";
+    const nowMinutes = toMinutes(nowClock(new Date(liveNow))) ?? 0;
+    if (eveningCapable && draft.date === todayStr() && nowMinutes >= EVENING_STARTS_AT && draftMode === "full") {
+      setShiftMode("pmev");
+      notify({
+        type: "info",
+        title: "Switched to Afternoon → Evening",
+        message: "It's already past 5:00 PM, so this entry now covers Afternoon → Evening. Adjust the times if needed.",
+      });
+    } else if (!eveningCapable && (draftMode === "ev" || draftMode === "pmev")) {
+      setShiftMode("full");
+    }
+  }
+
+  // Loads an existing entry back into the draft form so its times, client,
+  // shift type, and remarks can be corrected — e.g. the OJT coordinator
+  // called an early out at 2:06 PM instead of the planned 5:00 PM.
+  function startEdit(entry) {
+    const hasAM = !!(entry.amIn && entry.amOut);
+    const hasPM = !!(entry.pmIn && entry.pmOut);
+    const hasEV = !!(entry.evIn && entry.evOut);
+    let mode = "full";
+    if (hasAM && !hasPM && !hasEV) mode = "am";
+    else if (!hasAM && hasPM && !hasEV) mode = "pm";
+    else if (!hasAM && !hasPM && hasEV) mode = "ev";
+    else if (!hasAM && hasPM && hasEV) mode = "pmev";
+    else mode = "full";
+
+    setDraft({
+      date: entry.date,
+      amIn: entry.amIn || "",
+      amOut: entry.amOut || "",
+      pmIn: entry.pmIn || "",
+      pmOut: entry.pmOut || "",
+      evIn: entry.evIn || "",
+      evOut: entry.evOut || "",
+      client: entry.client || "",
+      category: entry.category,
+      task: entry.task || "",
+    });
+    setDraftMode(mode);
+    setEditingId(entry.id);
+    requestAnimationFrame(() => {
+      document.querySelector(".ledger-new-wrap")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
     setDraft(emptyDraft());
     setDraftMode("full");
   }
 
+  // Checks a draft against the app's rules before it's saved: a date is
+  // required and can't be in the future, a host client is required, at
+  // least one time segment must be filled in, none of those times can be
+  // later than right now (when logging for today), and the segment(s)
+  // can't overlap a time range already logged for that same date — no
+  // duplicate "whole day" entries stacked on top of each other.
+  function validateDraft(d, excludeId) {
+    if (!d.date) return "Please pick a date.";
+    if (isFutureDate(d.date)) return "You can't log a future date — pick today or an earlier date.";
+    if (!d.client) return "Host client is required — please select one.";
+
+    const segs = draftSegments(d);
+    if (segs.length === 0) return "Enter at least one time range for this entry.";
+
+    const futureField = [
+      ["amOut", d.amOut],
+      ["pmOut", d.pmOut],
+      ["evOut", d.evOut],
+    ].find(([, val]) => isFutureTime(d.date, val, new Date(liveNow)));
+    if (futureField) return "Time can't be later than the current time.";
+
+    for (const e of entries) {
+      if (e.id === excludeId) continue;
+      if (e.date !== d.date) continue;
+      const existingSegs = draftSegments(e);
+      for (const a of segs) {
+        for (const b of existingSegs) {
+          if (rangesOverlap(a.start, a.end, b.start, b.end)) {
+            return `That overlaps a ${b.label.toLowerCase()} entry you already logged for ${formatDateLong(d.date)}. Edit or delete it first instead of adding a duplicate.`;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  function submitEntry() {
+    const error = validateDraft(draft, editingId);
+    if (error) {
+      notify({ type: "warning", title: "Can't save this entry", message: error });
+      return;
+    }
+    const hrs = segmentHours(draft);
+    if (hrs <= 0) {
+      notify({ type: "warning", title: "Can't save this entry", message: "Total hours must be greater than zero." });
+      return;
+    }
+    const built = { ...draft, client: draft.client || null, hours: hrs };
+
+    if (editingId) {
+      setEntries((prev) =>
+        prev.map((e) => (e.id === editingId ? { ...built, id: editingId } : e)).sort((a, b) => a.date.localeCompare(b.date))
+      );
+      notify({
+        type: "success",
+        title: "Entry updated",
+        message: `${formatDateLong(draft.date)} was updated to ${formatHours(hrs)}.`,
+      });
+    } else {
+      setEntries((prev) => [...prev, { id: uid(), ...built }].sort((a, b) => a.date.localeCompare(b.date)));
+      notify({
+        type: "success",
+        title: "Entry added",
+        message: `Logged ${formatHours(hrs)} for ${formatDateLong(draft.date)}.`,
+      });
+    }
+    setDraft(emptyDraft());
+    setDraftMode("full");
+    setEditingId(null);
+  }
+
   function deleteEntry(id) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (id === editingId) cancelEdit();
     notify({
       type: "info",
       title: "Entry deleted",
@@ -332,16 +482,41 @@ export default function LogbookPage() {
   }
 
   function requestDeleteEntry(id) {
-    setConfirmDeleteId(id);
+    setConfirmDialog({ kind: "entry", id });
   }
 
-  function cancelDeleteEntry() {
-    setConfirmDeleteId(null);
+  // A host client can't be removed once it's actually been used on a duty
+  // entry — whole day, or any single Morning/Afternoon/Evening coverage
+  // added via "Add day" (or a clocked session). Removing it would orphan
+  // real logged hours, so it must first be cleared off every entry (by
+  // editing those entries to a different client) before it can go away.
+  function clientEntryCount(id) {
+    return entries.filter((e) => e.client === id).length;
   }
 
-  function confirmDeleteEntry() {
-    if (confirmDeleteId) deleteEntry(confirmDeleteId);
-    setConfirmDeleteId(null);
+  function requestDeleteClient(id) {
+    const count = clientEntryCount(id);
+    if (count > 0) {
+      const client = clients.find((c) => c.id === id);
+      notify({
+        type: "warning",
+        title: "Can't remove this host client",
+        message: `"${client?.name || "This client"}" is used on ${count} duty log ${count === 1 ? "entry" : "entries"} (added via Add day / shift coverage). Edit or delete those entries first, then remove the client.`,
+      });
+      return;
+    }
+    setConfirmDialog({ kind: "client", id });
+  }
+
+  function cancelConfirm() {
+    setConfirmDialog(null);
+  }
+
+  function confirmDialogAction() {
+    if (!confirmDialog) return;
+    if (confirmDialog.kind === "entry") deleteEntry(confirmDialog.id);
+    else if (confirmDialog.kind === "client") removeClient(confirmDialog.id);
+    setConfirmDialog(null);
   }
 
   function addClient() {
@@ -357,6 +532,7 @@ export default function LogbookPage() {
 
   function removeClient(id) {
     setClients((prev) => prev.filter((c) => c.id !== id));
+    notify({ type: "info", title: "Host client removed", message: "The host client was removed from your list." });
   }
 
   function clientName(id) {
@@ -462,11 +638,12 @@ export default function LogbookPage() {
 
     y += 64;
 
-    // ---------- Detailed daily table (Morning + Afternoon breakdown) ----------
+    // ---------- Detailed daily table (Morning + Afternoon + Evening breakdown) ----------
     const rows = entries.map((e) => [
       formatDateLong(e.date),
       e.amIn && e.amOut ? `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}` : "—",
       e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—",
+      e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—",
       formatHours(e.hours),
       clientName(e.client),
       categoryLabel(e.category),
@@ -476,18 +653,19 @@ export default function LogbookPage() {
     autoTable(doc, {
       startY: y,
       margin: { left: margin, right: margin },
-      head: [["Date", "Morning (In – Lunch)", "Afternoon (Lunch – Out)", "Hours", "Host Client", "Type", "Task / Remarks"]],
+      head: [["Date", "Morning (In – Lunch)", "Afternoon (Lunch – Out)", "Evening (In – Out)", "Hours", "Host Client", "Type", "Task / Remarks"]],
       body: rows,
-      styles: { font: "helvetica", fontSize: 8.2, cellPadding: 5, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
+      styles: { font: "helvetica", fontSize: 7.6, cellPadding: 4.5, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
       headStyles: { fillColor: [22, 33, 28], textColor: [255, 255, 255], fontStyle: "bold" },
       alternateRowStyles: { fillColor: [246, 248, 246] },
       columnStyles: {
-        0: { cellWidth: 76 },
-        1: { cellWidth: 78 },
-        2: { cellWidth: 78 },
-        3: { cellWidth: 48, halign: "center" },
-        4: { cellWidth: 82 },
-        5: { cellWidth: 52 },
+        0: { cellWidth: 68 },
+        1: { cellWidth: 68 },
+        2: { cellWidth: 68 },
+        3: { cellWidth: 68 },
+        4: { cellWidth: 42, halign: "center" },
+        5: { cellWidth: 72 },
+        6: { cellWidth: 48 },
       },
       didDrawPage: () => {
         const pageCount = doc.internal.getNumberOfPages();
@@ -534,10 +712,21 @@ export default function LogbookPage() {
   return (
     <div className="duty-page">
       <ToastStack />
-      {confirmDeleteId && (() => {
-        const target = entries.find((e) => e.id === confirmDeleteId);
+      {confirmDialog && (() => {
+        const isEntry = confirmDialog.kind === "entry";
+        const target = isEntry
+          ? entries.find((e) => e.id === confirmDialog.id)
+          : clients.find((c) => c.id === confirmDialog.id);
+        const title = isEntry ? "Delete this entry?" : "Remove this host client?";
+        const message = isEntry
+          ? target
+            ? `Are you sure you want to delete the entry for ${formatDateLong(target.date)}? This can't be undone.`
+            : "Are you sure you want to delete this entry? This can't be undone."
+          : target
+          ? `Are you sure you want to remove "${target.name}"? It has no duty log entries, so this is safe.`
+          : "Are you sure you want to remove this host client?";
         return (
-          <div className="confirm-overlay" role="presentation" onClick={cancelDeleteEntry}>
+          <div className="confirm-overlay" role="presentation" onClick={cancelConfirm}>
             <div
               className="confirm-card"
               role="alertdialog"
@@ -545,18 +734,14 @@ export default function LogbookPage() {
               aria-labelledby="confirm-delete-title"
               onClick={(ev) => ev.stopPropagation()}
             >
-              <h3 id="confirm-delete-title">Delete this entry?</h3>
-              <p>
-                {target
-                  ? `Are you sure you want to delete the entry for ${formatDateLong(target.date)}? This can't be undone.`
-                  : "Are you sure you want to delete this entry? This can't be undone."}
-              </p>
+              <h3 id="confirm-delete-title">{title}</h3>
+              <p>{message}</p>
               <div className="confirm-actions">
-                <button className="confirm-btn confirm-btn--no" onClick={cancelDeleteEntry}>
+                <button className="confirm-btn confirm-btn--no" onClick={cancelConfirm}>
                   No, keep it
                 </button>
-                <button className="confirm-btn confirm-btn--yes" onClick={confirmDeleteEntry}>
-                  Yes, delete
+                <button className="confirm-btn confirm-btn--yes" onClick={confirmDialogAction}>
+                  Yes, {isEntry ? "delete" : "remove"}
                 </button>
               </div>
             </div>
@@ -672,19 +857,28 @@ export default function LogbookPage() {
           </div>
           <div className="setup-field grow">
             <label>
-              <Users size={12} /> Host clients
+              <Users size={12} /> Host clients <span className="required-mark">*</span>
             </label>
             <div className="client-manager">
               <div className="client-chips">
                 {clients.length === 0 && <span className="chips-empty">No clients added yet</span>}
-                {clients.map((c) => (
-                  <span className="client-chip" key={c.id}>
-                    {c.name}
-                    <button onClick={() => removeClient(c.id)} aria-label={`Remove ${c.name}`}>
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
+                {clients.map((c) => {
+                  const inUseCount = clientEntryCount(c.id);
+                  return (
+                    <span className={`client-chip${inUseCount > 0 ? " in-use" : ""}`} key={c.id}>
+                      {c.name}
+                      {inUseCount > 0 && <span className="chip-count">{inUseCount}</span>}
+                      <button
+                        onClick={() => requestDeleteClient(c.id)}
+                        aria-label={inUseCount > 0 ? `${c.name} is used on ${inUseCount} duty log entries and can't be removed` : `Remove ${c.name}`}
+                        disabled={inUseCount > 0}
+                        title={inUseCount > 0 ? `Used on ${inUseCount} duty log ${inUseCount === 1 ? "entry" : "entries"} — edit or delete those first` : "Remove client"}
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
               <div className="client-add">
                 <input
@@ -716,6 +910,7 @@ export default function LogbookPage() {
               <span>Date</span>
               <span><Sun size={11} /> Morning</span>
               <span><Sunset size={11} /> Afternoon</span>
+              <span><Moon size={11} /> Evening</span>
               <span>Hours</span>
               <span>Client</span>
               <span>Type</span>
@@ -731,10 +926,11 @@ export default function LogbookPage() {
               .slice()
               .reverse()
               .map((e) => (
-                <div className="ledger-row" key={e.id}>
+                <div className={`ledger-row${e.id === editingId ? " is-editing" : ""}`} key={e.id}>
                   <span data-label="Date">{formatDateLong(e.date)}</span>
                   <span data-label="Morning">{e.amIn && e.amOut ? `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}` : "—"}</span>
                   <span data-label="Afternoon">{e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—"}</span>
+                  <span data-label="Evening">{e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—"}</span>
                   <span className="ledger-hours" data-label="Hours">{formatHours(e.hours)}</span>
                   <span className="truncate" data-label="Client">{clientName(e.client)}</span>
                   <span data-label="Type">
@@ -743,66 +939,118 @@ export default function LogbookPage() {
                   <span className="truncate" title={e.task} data-label="Notes">
                     {e.task || "—"}
                   </span>
-                  <button className="del-btn" onClick={() => requestDeleteEntry(e.id)} aria-label="Delete entry">
-                    <Trash2 size={15} />
-                  </button>
+                  <span className="row-actions">
+                    <button className="edit-btn" onClick={() => startEdit(e)} aria-label="Edit entry">
+                      <Pencil size={14} />
+                    </button>
+                    <button className="del-btn" onClick={() => requestDeleteEntry(e.id)} aria-label="Delete entry">
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
                 </div>
               ))}
 
-            <div className="ledger-new-wrap">
+            <div className={`ledger-new-wrap${editingId ? " is-editing" : ""}`}>
+              {editingId && (
+                <div className="editing-banner">
+                  <Pencil size={13} /> Editing an existing entry — change whatever needs correcting (e.g. an early out) and save.
+                </div>
+              )}
+
               <div className="shift-mode-row">
                 <label className="shift-mode-label">Shift coverage</label>
                 <div className="shift-mode-toggle">
-                  <button
-                    type="button"
-                    className={draftMode === "full" ? "active" : ""}
-                    onClick={() => setShiftMode("full")}
-                  >
-                    Whole day
-                  </button>
-                  <button
-                    type="button"
-                    className={draftMode === "am" ? "active" : ""}
-                    onClick={() => setShiftMode("am")}
-                  >
-                    <Sun size={12} /> Morning only
-                  </button>
-                  <button
-                    type="button"
-                    className={draftMode === "pm" ? "active" : ""}
-                    onClick={() => setShiftMode("pm")}
-                  >
-                    <Sunset size={12} /> Afternoon only
-                  </button>
+                  {coverageOptionsFor(draft.category).map((key) => {
+                    const meta = COVERAGE_META[key];
+                    const Icon = meta.icon;
+                    return (
+                      <button
+                        type="button"
+                        key={key}
+                        className={draftMode === key ? "active" : ""}
+                        onClick={() => setShiftMode(key)}
+                      >
+                        {Icon && <Icon size={12} />} {meta.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="ledger-new-grid">
                 <div className="new-field">
                   <label>Date</label>
-                  <input type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+                  <input
+                    type="date"
+                    value={draft.date}
+                    max={todayStr()}
+                    onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
+                  />
                 </div>
-                {draftMode !== "pm" && (
+                {(draftMode === "full" || draftMode === "am") && (
                   <>
                     <div className="new-field">
                       <label><Sun size={11} /> Morning in</label>
-                      <input type="time" value={draft.amIn} onChange={(e) => setDraft((d) => ({ ...d, amIn: e.target.value }))} />
+                      <input
+                        type="time"
+                        value={draft.amIn}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, amIn: e.target.value }))}
+                      />
                     </div>
                     <div className="new-field">
                       <label>Lunch out</label>
-                      <input type="time" value={draft.amOut} onChange={(e) => setDraft((d) => ({ ...d, amOut: e.target.value }))} />
+                      <input
+                        type="time"
+                        value={draft.amOut}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, amOut: e.target.value }))}
+                      />
                     </div>
                   </>
                 )}
-                {draftMode !== "am" && (
+                {(draftMode === "full" || draftMode === "pm" || draftMode === "pmev") && (
                   <>
                     <div className="new-field">
                       <label><Sunset size={11} /> Lunch in</label>
-                      <input type="time" value={draft.pmIn} onChange={(e) => setDraft((d) => ({ ...d, pmIn: e.target.value }))} />
+                      <input
+                        type="time"
+                        value={draft.pmIn}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, pmIn: e.target.value }))}
+                      />
                     </div>
                     <div className="new-field">
                       <label>Afternoon out</label>
-                      <input type="time" value={draft.pmOut} onChange={(e) => setDraft((d) => ({ ...d, pmOut: e.target.value }))} />
+                      <input
+                        type="time"
+                        value={draft.pmOut}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, pmOut: e.target.value }))}
+                      />
+                      <span className="field-hint">Left early? Set the actual time you clocked out.</span>
+                    </div>
+                  </>
+                )}
+                {(draftMode === "ev" || draftMode === "pmev") && (
+                  <>
+                    <div className="new-field">
+                      <label><Moon size={11} /> Evening in</label>
+                      <input
+                        type="time"
+                        value={draft.evIn}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, evIn: e.target.value }))}
+                      />
+                    </div>
+                    <div className="new-field">
+                      <label>Evening out</label>
+                      <input
+                        type="time"
+                        value={draft.evOut}
+                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, evOut: e.target.value }))}
+                      />
                     </div>
                   </>
                 )}
@@ -813,9 +1061,13 @@ export default function LogbookPage() {
               </div>
               <div className="ledger-new-grid secondary">
                 <div className="new-field grow">
-                  <label>Host client</label>
-                  <select value={draft.client} onChange={(e) => setDraft((d) => ({ ...d, client: e.target.value }))}>
-                    <option value="">Unassigned</option>
+                  <label>Host client <span className="required-mark">*</span></label>
+                  <select
+                    className={!draft.client ? "field-required" : ""}
+                    value={draft.client}
+                    onChange={(e) => setDraft((d) => ({ ...d, client: e.target.value }))}
+                  >
+                    <option value="">Select a host client…</option>
                     {clients.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -825,7 +1077,7 @@ export default function LogbookPage() {
                 </div>
                 <div className="new-field">
                   <label>Shift type</label>
-                  <select value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}>
+                  <select value={draft.category} onChange={(e) => handleCategoryChange(e.target.value)}>
                     {CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.label}
@@ -837,14 +1089,27 @@ export default function LogbookPage() {
                   <label>Task / remarks</label>
                   <input
                     type="text"
-                    placeholder="What did you work on?"
+                    placeholder="What are you working on?"
                     value={draft.task}
                     onChange={(e) => setDraft((d) => ({ ...d, task: e.target.value }))}
                   />
                 </div>
-                <button className="add-btn" onClick={addEntry} aria-label="Add entry">
-                  <Plus size={17} /> Add day
-                </button>
+                <div className="new-field-actions">
+                  {editingId && (
+                    <button className="cancel-edit-btn" onClick={cancelEdit} type="button" aria-label="Cancel edit">
+                      <XCircle size={15} /> Cancel
+                    </button>
+                  )}
+                  <button className="add-btn" onClick={submitEntry} aria-label={editingId ? "Save changes" : "Add entry"}>
+                    {editingId ? (
+                      <>Save changes</>
+                    ) : (
+                      <>
+                        <Plus size={17} /> Add {COVERAGE_META[draftMode].short}
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 

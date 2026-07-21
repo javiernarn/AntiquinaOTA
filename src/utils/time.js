@@ -101,3 +101,40 @@ export function formatDuration(ms) {
 export function msToHours(ms) {
   return Math.round((ms / 3600000) * 100) / 100;
 }
+
+// "July 22, 2026 — Wednesday" — used for the detailed/report views where the
+// weekday needs to be obvious at a glance, not just the short calendar date.
+export function formatDateReport(dateStr) {
+  if (!dateStr) return "";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  const monthDay = dt.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const weekday = dt.toLocaleDateString(undefined, { weekday: "long" });
+  return `${monthDay} — ${weekday}`;
+}
+
+// True if dateStr (YYYY-MM-DD) is later than today, local time.
+export function isFutureDate(dateStr) {
+  if (!dateStr) return false;
+  return dateStr > todayStr();
+}
+
+// True if the given HH:MM on dateStr hasn't happened yet, local time.
+// Only meaningful for today's date — any other date is either fully in the
+// past or already blocked by isFutureDate.
+export function isFutureTime(dateStr, timeStr, refDate = new Date()) {
+  if (!dateStr || !timeStr) return false;
+  if (dateStr !== todayStr(refDate)) return false;
+  const t = toMinutes(timeStr);
+  const now = toMinutes(nowClock(refDate));
+  return t !== null && now !== null && t > now;
+}
+
+// Two HH:MM ranges overlap if one starts before the other ends, both ways.
+export function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
