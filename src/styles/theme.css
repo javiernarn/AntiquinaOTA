@@ -47,9 +47,16 @@ body {
 
 img { max-width: 100%; }
 
-/* Comfortable tap targets on touch devices, per mobile usability guidance */
+/* Comfortable tap targets on touch devices, per mobile usability guidance —
+   scoped to actual form controls and primary actions, NOT small icon
+   buttons (chip remove ×, row delete, toast close), which would otherwise
+   get forced to 40px and blow out of their small containers. */
 @media (max-width: 640px) {
-  button, select, input, a.landing-cta { min-height: 40px; }
+  input, select { min-height: 40px; }
+  button:not(.client-chip button):not(.del-btn):not(.toast-close):not(.icon-btn):not(.bell-btn) {
+    min-height: 40px;
+  }
+  a.landing-cta { min-height: 40px; }
 }
 
 button, input, select {
@@ -266,9 +273,10 @@ button, input, select {
   gap: 6px;
   flex-wrap: wrap;
   text-align: center;
-  padding: 18px 10px calc(14px + env(safe-area-inset-bottom));
-  margin-top: 10px;
+  padding: 14px 10px 4px;
+  margin-top: 4px;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--ink-soft, var(--text-muted));
 }
 .app-footer__tag {
@@ -279,8 +287,8 @@ button, input, select {
 .app-footer__text a {
   color: var(--ink, var(--text));
   font-weight: 600;
-  text-decoration: none;
-  border-bottom: 1px solid currentColor;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   opacity: 0.85;
 }
 .app-footer__text a:hover { opacity: 1; }

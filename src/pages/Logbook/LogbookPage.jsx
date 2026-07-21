@@ -87,6 +87,7 @@ export default function LogbookPage() {
   const [newClientName, setNewClientName] = useState("");
   const [exporting, setExporting] = useState(false);
   const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" — which segment(s) this manual entry covers
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const [activeSession, setActiveSession] = useState(() => getStorage(SESSION_KEY));
   const [sessionClient, setSessionClient] = useState("");
@@ -323,6 +324,24 @@ export default function LogbookPage() {
 
   function deleteEntry(id) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
+    notify({
+      type: "info",
+      title: "Entry deleted",
+      message: "The logbook entry was removed.",
+    });
+  }
+
+  function requestDeleteEntry(id) {
+    setConfirmDeleteId(id);
+  }
+
+  function cancelDeleteEntry() {
+    setConfirmDeleteId(null);
+  }
+
+  function confirmDeleteEntry() {
+    if (confirmDeleteId) deleteEntry(confirmDeleteId);
+    setConfirmDeleteId(null);
   }
 
   function addClient() {
@@ -515,6 +534,35 @@ export default function LogbookPage() {
   return (
     <div className="duty-page">
       <ToastStack />
+      {confirmDeleteId && (() => {
+        const target = entries.find((e) => e.id === confirmDeleteId);
+        return (
+          <div className="confirm-overlay" role="presentation" onClick={cancelDeleteEntry}>
+            <div
+              className="confirm-card"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="confirm-delete-title"
+              onClick={(ev) => ev.stopPropagation()}
+            >
+              <h3 id="confirm-delete-title">Delete this entry?</h3>
+              <p>
+                {target
+                  ? `Are you sure you want to delete the entry for ${formatDateLong(target.date)}? This can't be undone.`
+                  : "Are you sure you want to delete this entry? This can't be undone."}
+              </p>
+              <div className="confirm-actions">
+                <button className="confirm-btn confirm-btn--no" onClick={cancelDeleteEntry}>
+                  No, keep it
+                </button>
+                <button className="confirm-btn confirm-btn--yes" onClick={confirmDeleteEntry}>
+                  Yes, delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="duty-shell">
         <header className={`duty-topbar${scrolled ? " is-scrolled" : ""}`}>
@@ -695,7 +743,7 @@ export default function LogbookPage() {
                   <span className="truncate" title={e.task} data-label="Notes">
                     {e.task || "—"}
                   </span>
-                  <button className="del-btn" onClick={() => deleteEntry(e.id)} aria-label="Delete entry">
+                  <button className="del-btn" onClick={() => requestDeleteEntry(e.id)} aria-label="Delete entry">
                     <Trash2 size={15} />
                   </button>
                 </div>

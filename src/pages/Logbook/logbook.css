@@ -218,7 +218,11 @@ select {
   padding: 4px 6px 4px 10px;
   border-radius: 999px;
 }
-.client-chip button { background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer; display: flex; }
+.client-chip button {
+  background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  padding: 2px; flex-shrink: 0;
+}
 .client-chip button:hover { opacity: 1; }
 .client-add { display: flex; gap: 6px; }
 .client-add input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--paper); }
@@ -287,6 +291,43 @@ select {
   border-radius: 6px;
 }
 .del-btn:hover { color: var(--danger); background: var(--rust-soft); }
+
+/* ---------- Delete confirmation ---------- */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 33, 28, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 200;
+}
+.confirm-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 22px 22px 18px;
+  max-width: 340px;
+  width: 100%;
+}
+.confirm-card h3 { margin: 0 0 8px; font-family: 'Space Grotesk', sans-serif; font-size: 16px; }
+.confirm-card p { margin: 0 0 18px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-btn {
+  flex: 1;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+.confirm-btn--no { background: var(--card); color: var(--ink); }
+.confirm-btn--no:hover { border-color: var(--ink-soft); }
+.confirm-btn--yes { background: var(--rust); color: #fff; border-color: var(--rust); }
+.confirm-btn--yes:hover { background: #9c3324; }
 
 .empty-row { font-size: 12.5px; color: var(--ink-soft); padding: 18px 0; font-style: italic; }
 
