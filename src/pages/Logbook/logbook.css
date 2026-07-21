@@ -1,0 +1,508 @@
+.duty-page { min-height: 100vh; padding: 0 18px 60px; }
+.duty-shell { max-width: 940px; margin: 0 auto; }
+
+/* ---------- Top bar: stays fixed in place while the page scrolls ---------- */
+.duty-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--paper);
+  padding: 16px 0 14px;
+  padding-top: calc(16px + env(safe-area-inset-top)); /* clears the status bar / notch once installed as an app */
+  margin-bottom: 8px;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.duty-topbar.is-scrolled {
+  border-bottom-color: var(--line);
+  box-shadow: 0 4px 14px rgba(22, 33, 28, 0.06);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-logo {
+  width: 46px; height: 46px;
+  object-fit: contain;
+  padding: 5px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  flex-shrink: 0;
+}
+.brand-eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: var(--brass);
+  margin-bottom: 1px;
+}
+.brand-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; line-height: 1.15; }
+.brand-sub { font-size: 11.5px; color: var(--ink-soft); }
+
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.user-chip { display: flex; align-items: center; gap: 8px; }
+.avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--brass-soft);
+  color: #5A4114;
+  font-size: 11.5px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.avatar-photo { object-fit: cover; border: 1px solid var(--line); }
+.user-name { font-size: 13px; color: var(--ink-soft); }
+.signout-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  padding: 8px 13px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.signout-btn:hover { color: var(--danger); border-color: var(--rust); }
+
+/* ---------- Hero: ring + live clock ---------- */
+.duty-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 26px;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 26px;
+  box-shadow: var(--shadow);
+  margin-bottom: 18px;
+}
+
+.hero-ring { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+.duty-ring { position: relative; width: 224px; height: 224px; }
+.ring-track { fill: none; stroke: var(--line); }
+.ring-tick { stroke: var(--line); stroke-width: 2; }
+.ring-tick.major { stroke: var(--ink-soft); stroke-width: 2.4; }
+.ring-progress { fill: none; stroke: var(--brass); transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease; }
+.duty-ring.is-complete .ring-progress { stroke: var(--teal); }
+.duty-ring.is-live .ring-progress { filter: drop-shadow(0 0 5px rgba(169, 131, 47, 0.5)); }
+.duty-ring.is-complete.is-live .ring-progress { filter: drop-shadow(0 0 6px rgba(31, 122, 92, 0.55)); }
+
+.ring-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+}
+.ring-hours { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600; }
+.ring-target { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.ring-percent { font-size: 12.5px; color: var(--brass); font-weight: 600; margin-top: 6px; }
+.duty-ring.is-complete .ring-percent { color: var(--teal); }
+
+.ring-seal {
+  position: absolute;
+  bottom: 6px; left: 50%;
+  transform: translateX(-50%) rotate(-4deg);
+  background: var(--teal);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  animation: seal-pop 0.4s ease;
+}
+@keyframes seal-pop { from { transform: translateX(-50%) rotate(-4deg) scale(0.7); opacity: 0; } to { transform: translateX(-50%) rotate(-4deg) scale(1); opacity: 1; } }
+
+.ring-footnote { display: flex; gap: 8px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; justify-content: center; }
+.ot-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+
+.hero-clock { display: flex; flex-direction: column; gap: 10px; }
+.clock-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
+.clock-label.live { color: var(--teal); }
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
+  animation: pulse 1.4s infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.clock-digits {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.clock-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.clock-controls select, .clock-controls input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.clock-controls input[type="text"] { flex: 1; min-width: 160px; }
+
+/* ---------- Selects: consistent size + custom arrow everywhere ----------
+   Native <select> menus render with the OS/browser's own dropdown list — that
+   part can't be restyled — but the closed control itself was inconsistent in
+   height/padding and used the bulky default arrow. This normalizes it. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2356635A' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 10px 6px;
+  padding-right: 26px !important;
+  max-width: 100%;
+}
+
+.clock-in-btn, .clock-out-btn {
+  display: flex; align-items: center; gap: 6px;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.clock-in-btn { background: var(--teal); color: #fff; }
+.clock-in-btn:hover { background: #185f49; }
+.clock-out-btn { background: var(--rust); color: #fff; }
+.clock-out-btn:hover { background: #9c3324; }
+
+.clock-hint { font-size: 11.5px; color: var(--ink-soft); margin: 0; }
+
+/* ---------- Setup row ---------- */
+.duty-setup {
+  display: grid;
+  grid-template-columns: 1fr 140px 1.6fr;
+  gap: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  margin-bottom: 18px;
+}
+.setup-field label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--ink-soft); margin-bottom: 6px;
+}
+.setup-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--paper);
+}
+.setup-field input:focus { outline: none; border-color: var(--brass); }
+
+.client-manager { display: flex; flex-direction: column; gap: 8px; }
+.client-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+.chips-empty { font-size: 12px; color: var(--ink-soft); font-style: italic; }
+.client-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--evening-soft);
+  color: var(--evening);
+  font-size: 12px; font-weight: 500;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+}
+.client-chip button { background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer; display: flex; }
+.client-chip button:hover { opacity: 1; }
+.client-add { display: flex; gap: 6px; }
+.client-add input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--paper); }
+.client-add button {
+  background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
+  width: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.client-add button:hover { background: var(--brass); }
+
+/* ---------- Tabs ---------- */
+.duty-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.duty-tabs button {
+  background: none; border: none;
+  padding: 8px 4px;
+  font-size: 13.5px; font-weight: 600;
+  color: var(--ink-soft);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-right: 14px;
+}
+.duty-tabs button.active { color: var(--ink); border-bottom-color: var(--brass); }
+
+/* ---------- Ledger ---------- */
+.ledger-card, .reports-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px 14px;
+  box-shadow: var(--shadow);
+}
+
+.ledger-head, .ledger-row {
+  display: grid;
+  grid-template-columns: 118px 118px 118px 66px 1.1fr 90px 1.2fr 30px;
+  gap: 8px;
+  align-items: center;
+}
+.ledger-head {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px;
+  color: var(--ink-soft);
+  padding-bottom: 8px;
+  border-bottom: 1.5px solid var(--ink);
+}
+.ledger-head span { display: flex; align-items: center; gap: 4px; }
+.ledger-row {
+  font-size: 13px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ledger-hours { font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+
+.tag {
+  font-size: 10.5px; font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.tag-regular { background: var(--brass-soft); color: #5A4114; }
+.tag-evening { background: var(--evening-soft); color: var(--evening); }
+.tag-overtime { background: var(--rust-soft); color: var(--rust); }
+
+.del-btn {
+  background: none; border: none; cursor: pointer; color: var(--ink-soft);
+  padding: 4px; display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.del-btn:hover { color: var(--danger); background: var(--rust-soft); }
+
+.empty-row { font-size: 12.5px; color: var(--ink-soft); padding: 18px 0; font-style: italic; }
+
+/* ---------- Add-a-day form (Morning / Afternoon segments) ---------- */
+.ledger-new-wrap {
+  background: var(--paper);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  margin: 14px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Shift-coverage toggle: lets you drop the morning or afternoon segment
+   entirely for clients/days that only run half a shift. */
+.shift-mode-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shift-mode-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--ink-soft); font-weight: 700;
+}
+.shift-mode-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+.shift-mode-toggle button {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.shift-mode-toggle button:hover { border-color: var(--brass); color: var(--ink); }
+.shift-mode-toggle button.active {
+  background: var(--ink); color: var(--paper); border-color: var(--ink);
+}
+
+.ledger-new-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+.ledger-new-grid > .new-field { flex: 1 1 110px; }
+.ledger-new-grid > .new-field.small { flex: 0 1 90px; }
+.ledger-new-grid.secondary > .new-field { flex: 1 1 160px; }
+.ledger-new-grid.secondary > .new-field.grow { flex: 2 1 220px; }
+.new-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.new-field.grow { width: 100%; }
+.new-field label {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--ink-soft); font-weight: 600;
+}
+.new-field input, .new-field select {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 8px;
+  font-size: 12.5px;
+  width: 100%;
+}
+.new-field input:focus, .new-field select:focus { outline: none; border-color: var(--brass); }
+.new-hours {
+  font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700;
+  color: var(--teal); text-align: center; background: var(--teal-soft);
+  border-radius: 7px; padding: 7px 0;
+}
+.add-btn {
+  background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
+  padding: 9px 16px;
+  display: flex; align-items: center; gap: 6px; justify-content: center; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+}
+.add-btn:hover { background: var(--teal); }
+
+.ledger-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  flex-wrap: wrap; gap: 10px;
+}
+.export-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: 1.4px solid var(--ink); color: var(--ink);
+  padding: 8px 14px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+}
+.export-btn:hover { background: var(--ink); color: var(--paper); }
+.export-btn:disabled { opacity: 0.6; cursor: wait; }
+.export-btn:disabled:hover { background: none; color: var(--ink); }
+.save-note { font-size: 11px; color: var(--ink-soft); }
+
+/* ---------- Reports ---------- */
+.reports-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.report-card h3 { font-family: 'Space Grotesk', sans-serif; font-size: 15px; margin: 0 0 14px; }
+.bar-list { display: flex; flex-direction: column; gap: 14px; }
+.bar-row-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
+.bar-name { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.bar-value { font-family: 'IBM Plex Mono', monospace; color: var(--ink-soft); }
+.bar-track { height: 8px; background: var(--paper); border-radius: 999px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--brass); border-radius: 999px; transition: width 0.5s ease; }
+.bar-fill.client { background: var(--evening); }
+.bar-meta { font-size: 10.5px; color: var(--ink-soft); margin-top: 3px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.report-total {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.reports-empty { padding: 30px 10px; text-align: center; color: var(--ink-soft); font-size: 13px; }
+
+/* ---------- Responsive: tablets and small laptops ---------- */
+@media (max-width: 900px) {
+  .duty-page { padding: 0 14px 50px; }
+  .ledger-head, .ledger-row {
+    grid-template-columns: 92px 96px 96px 56px 1fr 74px 1fr 26px;
+    font-size: 12px;
+  }
+}
+
+/* ---------- Responsive: phones (landscape phablets down to hero stacking) ---------- */
+@media (max-width: 720px) {
+  .duty-hero { grid-template-columns: 1fr; text-align: center; padding: 20px; }
+  .hero-clock { align-items: center; }
+  .clock-controls { justify-content: center; }
+  .duty-setup { grid-template-columns: 1fr; padding: 16px; }
+  .reports-grid { grid-template-columns: 1fr; }
+  .ledger-new-grid > .new-field { flex-basis: calc(50% - 8px); }
+  .ledger-new-grid.secondary > .new-field { flex-basis: 100%; }
+  .add-btn { width: 100%; padding: 11px 16px; }
+
+  /* Shift coverage: equal-width 3-up row instead of free-wrapping pills, so
+     it always lines up cleanly regardless of label length. */
+  .shift-mode-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .shift-mode-toggle {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    width: 100%;
+  }
+  .shift-mode-toggle button { padding: 8px 4px; font-size: 11px; }
+
+  /* iOS Safari auto-zooms into any input/select under 16px on focus — this
+     keeps every field at 16px on phones so tapping in doesn't jump-zoom. */
+  .clock-controls select,
+  .clock-controls input,
+  .setup-field input,
+  .client-add input,
+  .new-field input,
+  .new-field select {
+    font-size: 16px;
+  }
+}
+
+/* ---------- Responsive: all mobile phones — ledger becomes a card list ---------- */
+@media (max-width: 640px) {
+  .duty-page {
+    padding: 0 10px calc(50px + env(safe-area-inset-bottom));
+  }
+  .duty-topbar { padding: 12px 0 10px; padding-top: calc(12px + env(safe-area-inset-top)); margin-bottom: 12px; }
+  .brand-title { font-size: 16px; }
+  .brand-logo { width: 40px; height: 40px; }
+  .user-name { display: none; } /* keep the topbar compact on narrow phones */
+  .signout-btn span { display: none; }
+
+  .clock-digits { font-size: 32px; }
+  .ring-hours { font-size: 20px; }
+
+  .ledger-card, .reports-card { padding: 14px; border-radius: 14px; }
+
+  .ledger-head { display: none; } /* header row is redundant once rows become labeled cards */
+
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "date date"
+      "morning afternoon"
+      "hours client"
+      "type type"
+      "notes notes";
+    gap: 6px 10px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .ledger-row > span { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+  .ledger-row > span[data-label]::before {
+    content: attr(data-label);
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--ink-soft); font-weight: 700;
+  }
+  .ledger-row > span[data-label="Date"] { grid-area: date; }
+  .ledger-row > span[data-label="Morning"] { grid-area: morning; }
+  .ledger-row > span[data-label="Afternoon"] { grid-area: afternoon; }
+  .ledger-row > span[data-label="Hours"] { grid-area: hours; }
+  .ledger-row > span[data-label="Client"] { grid-area: client; }
+  .ledger-row > span[data-label="Type"] { grid-area: type; }
+  .ledger-row > span[data-label="Notes"] { grid-area: notes; }
+  .ledger-row .truncate { white-space: normal; }
+  .ledger-row .del-btn { position: absolute; top: 10px; right: 10px; }
+
+  .ledger-new-grid > .new-field { flex-basis: calc(50% - 8px); }
+  .ledger-footer { flex-direction: column; align-items: stretch; }
+  .export-btn { justify-content: center; width: 100%; }
+}
+
+/* ---------- Responsive: smallest phones (older/compact devices) ---------- */
+@media (max-width: 380px) {
+  .ledger-new-grid > .new-field { flex-basis: 100%; }
+  .duty-setup, .duty-hero { padding: 14px; }
+  .ring-footnote { font-size: 11px; }
+  .shift-mode-toggle button { font-size: 10.2px; padding: 8px 2px; gap: 3px; }
+}

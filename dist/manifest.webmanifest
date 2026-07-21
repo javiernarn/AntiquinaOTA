@@ -1,0 +1,20 @@
+{
+  "name": "OCC Duty Log — OJT Tracker",
+  "short_name": "OCC Duty Log",
+  "description": "Real-time on-the-job training duty log and hours tracker for Opol Community College trainees.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ECF0EC",
+  "theme_color": "#16211C",
+  "lang": "en",
+  "icons": [
+    { "src": "/icons/icon-16.png", "sizes": "16x16", "type": "image/png" },
+    { "src": "/icons/icon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
