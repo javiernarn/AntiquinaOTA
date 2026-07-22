@@ -1080,7 +1080,7 @@ export default function LogbookPage() {
 
               <div className="shift-mode-row">
                 <label className="shift-mode-label">Shift coverage</label>
-                <div className="shift-mode-toggle">
+                <div className={`shift-mode-toggle count-${coverageOptionsFor(draft.category).length}`}>
                   {coverageOptionsFor(draft.category).map((key) => {
                     const meta = COVERAGE_META[key];
                     const Icon = meta.icon;
@@ -1091,7 +1091,7 @@ export default function LogbookPage() {
                         className={draftMode === key ? "active" : ""}
                         onClick={() => setShiftMode(key)}
                       >
-                        {Icon && <Icon size={12} />} {meta.label}
+                        {Icon && <Icon size={12} />} <span>{meta.label}</span>
                       </button>
                     );
                   })}
