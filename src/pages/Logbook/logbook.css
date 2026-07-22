@@ -88,13 +88,15 @@
 .hero-ring { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 
 .duty-ring { position: relative; width: 224px; height: 224px; }
-.ring-track { fill: none; stroke: var(--line); }
-.ring-tick { stroke: var(--line); stroke-width: 2; }
-.ring-tick.major { stroke: var(--ink-soft); stroke-width: 2.4; }
-.ring-progress { fill: none; stroke: var(--brass); transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease; }
-.duty-ring.is-complete .ring-progress { stroke: var(--teal); }
-.duty-ring.is-live .ring-progress { filter: drop-shadow(0 0 5px rgba(169, 131, 47, 0.5)); }
-.duty-ring.is-complete.is-live .ring-progress { filter: drop-shadow(0 0 6px rgba(31, 122, 92, 0.55)); }
+/* Red track = required hours still owed toward the OJT target; the green
+   arc drawn on top of it is how much has actually been completed so far,
+   moving in real time as the clock (and any live/in-progress entry) advances. */
+.ring-track { fill: none; stroke: var(--rust-soft); }
+.ring-tick { stroke: var(--paper); stroke-width: 2; opacity: 0.7; }
+.ring-tick.major { stroke: var(--paper); stroke-width: 2.4; opacity: 0.9; }
+.ring-progress { fill: none; stroke: var(--teal); transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease; }
+.duty-ring.is-live .ring-progress { filter: drop-shadow(0 0 5px rgba(31, 122, 92, 0.5)); }
+.duty-ring.is-complete .ring-progress { filter: drop-shadow(0 0 6px rgba(31, 122, 92, 0.55)); }
 
 .ring-center {
   position: absolute; inset: 0;
@@ -103,8 +105,7 @@
 }
 .ring-hours { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600; }
 .ring-target { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
-.ring-percent { font-size: 12.5px; color: var(--brass); font-weight: 600; margin-top: 6px; }
-.duty-ring.is-complete .ring-percent { color: var(--teal); }
+.ring-percent { font-size: 12.5px; color: var(--teal); font-weight: 600; margin-top: 6px; }
 
 .ring-seal {
   position: absolute;
@@ -122,6 +123,7 @@
 @keyframes seal-pop { from { transform: translateX(-50%) rotate(-4deg) scale(0.7); opacity: 0; } to { transform: translateX(-50%) rotate(-4deg) scale(1); opacity: 1; } }
 
 .ring-footnote { display: flex; gap: 8px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; justify-content: center; }
+.remaining-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 .ot-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 
 .hero-clock { display: flex; flex-direction: column; gap: 10px; }
@@ -351,6 +353,35 @@ select {
 }
 .completion-badge.is-met { background: var(--teal-soft); color: var(--teal); }
 .completion-badge.is-short { background: var(--rust-soft); color: var(--rust); }
+.completion-badge.is-upcoming { background: var(--line); color: var(--ink-soft); }
+.completion-badge.is-progress {
+  background: var(--brass-soft); color: #5A4114;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.completion-badge.is-progress .live-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--brass);
+  animation: liveDotPulse 1.4s ease-in-out infinite;
+}
+@keyframes liveDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* Compact red/green bar under an in-progress row's hours — red is the
+   scheduled segment still owed, green is how much of it has actually
+   elapsed against the clock so far. */
+.inline-progress-track {
+  display: block; width: 100%; max-width: 96px; height: 4px;
+  border-radius: 999px; background: var(--rust-soft); overflow: hidden;
+}
+.inline-progress-fill {
+  display: block; height: 100%; background: var(--teal);
+  transition: width 1s linear;
+}
+
+.export-blocked-note {
+  font-size: 11px; color: var(--rust); display: block; margin-top: 6px;
+}
 
 /* ---------- Export controls: report-period selector + the export button ---------- */
 .export-controls { display: flex; align-items: center; gap: 8px; }
@@ -674,6 +705,16 @@ select {
 .timeline-segs { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
 .timeline-seg { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); }
 .timeline-seg em { color: var(--ink-soft); font-style: normal; }
+.timeline-seg.is-live { color: #5A4114; }
+.timeline-seg.is-live em { color: var(--brass); font-weight: 600; }
+
+/* ---------- Reports tab: real-time status banner ---------- */
+.reports-live-banner { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
+.live-banner-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; border-radius: 8px; padding: 8px 10px; }
+.live-banner-row.is-progress { background: var(--brass-soft); color: #5A4114; }
+.live-banner-row.is-progress svg { color: var(--brass); flex-shrink: 0; }
+.live-banner-row.is-upcoming { background: var(--line); color: var(--ink-soft); }
+.live-banner-row.is-upcoming svg { flex-shrink: 0; }
 .timeline-meta { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--ink-soft); flex-wrap: wrap; gap: 6px; }
 .timeline-client { display: flex; align-items: center; gap: 4px; }
 .timeline-total { font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600; }

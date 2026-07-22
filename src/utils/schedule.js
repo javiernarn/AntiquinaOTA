@@ -46,6 +46,28 @@ export function normalizeClient(client) {
   };
 }
 
+// Which of the Morning (before 12:00 PM) / Afternoon (1:00–5:00 PM) /
+// Evening (after 5:00 PM) segments a host client's own timeIn–timeOut
+// window actually overlaps. Drives which shift-coverage options make sense
+// for that client — e.g. a client whose hours are 1:00 PM–8:00 PM has no
+// Morning segment at all, so "Morning only" / "Whole day" shouldn't be
+// offered when that client is selected, and the Afternoon-in / Evening
+// fields should default to that client's own hours rather than the usual
+// 1:00 PM lunch-resume / 5:00 PM–8:00 PM assumption.
+export function clientCoverage(client) {
+  const c = normalizeClient(client);
+  const inMin = toMinutes(c.timeIn);
+  const outMin = toMinutes(c.timeOut);
+  if (inMin === null || outMin === null || outMin <= inMin) {
+    return { am: true, pm: true, ev: false };
+  }
+  return {
+    am: inMin < 12 * 60,
+    pm: inMin < 17 * 60 && outMin > 12 * 60,
+    ev: outMin > 17 * 60,
+  };
+}
+
 // Scheduled hours for one full day at this client, accounting for the fixed
 // 12:00–1:00 PM lunch break when the shift spans across it.
 export function dailyHoursFor(client) {

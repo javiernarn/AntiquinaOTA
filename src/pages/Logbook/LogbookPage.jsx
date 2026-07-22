@@ -31,7 +31,8 @@ import {
   formatDateTimePH,
 } from "../../utils/time";
 import { completionFor } from "../../utils/dutyStatus";
-import { COMPANY_TYPES, WEEKDAYS, normalizeClient, isWorkDay, dailyHoursFor, scheduleDaysLabel, defaultsForType } from "../../utils/schedule";
+import { liveEntryProgress } from "../../utils/liveProgress";
+import { COMPANY_TYPES, WEEKDAYS, normalizeClient, isWorkDay, dailyHoursFor, scheduleDaysLabel, defaultsForType, clientCoverage } from "../../utils/schedule";
 import "./logbook.css";
 
 const STORAGE_KEY = "logbook-v2";
@@ -66,12 +67,29 @@ const COVERAGE_META = {
 // one) no longer makes sense to pick. Afternoon/Evening stay available
 // regardless of what time it currently is — picking Afternoon while it's
 // still morning is a normal way to plan ahead for later in the same day.
-function coverageOptionsFor(category, restrictMorning) {
+// `clientCov` (from clientCoverage()) further narrows the list to whatever
+// segments the selected host client's own hours actually fall into — e.g.
+// a client whose hours are 1:00 PM–8:00 PM (no Morning) drops "full" and
+// "am" even for a Regular/Overtime category that would otherwise allow
+// them. Pass null when no client is selected yet, so the list isn't
+// prematurely restricted before the trainee has picked one.
+function coverageOptionsFor(category, restrictMorning, clientCov) {
   let opts;
   if (category === "evening") opts = ["ev", "pmev"];
   else if (category === "overtime") opts = ["full", "am", "pm", "ev", "pmev"];
   else opts = ["full", "am", "pm"];
-  return restrictMorning ? opts.filter((k) => k !== "full" && k !== "am") : opts;
+  if (restrictMorning) opts = opts.filter((k) => k !== "full" && k !== "am");
+  if (clientCov) {
+    opts = opts.filter((key) => {
+      if (key === "full") return clientCov.am && clientCov.pm;
+      if (key === "am") return clientCov.am;
+      if (key === "pm") return clientCov.pm;
+      if (key === "ev") return clientCov.ev;
+      if (key === "pmev") return clientCov.pm && clientCov.ev;
+      return true;
+    });
+  }
+  return opts;
 }
 
 const EVENING_STARTS_AT = 17 * 60; // 5:00 PM, in minutes — when "it's already evening"
@@ -274,7 +292,40 @@ export default function LogbookPage() {
     return () => clearTimeout(t);
   }, [loaded, studentName, targetHours, clients, entries, lastClientId, persist]);
 
-  const loggedHours = useMemo(() => entries.reduce((sum, e) => sum + e.hours, 0), [entries]);
+  // The wall clock this render is anchored to — recomputed every tick of
+  // useLiveClock() so every live-progress calculation below stays in sync
+  // with real time, not just with whatever was true the moment an entry
+  // was saved.
+  const nowDate = useMemo(() => new Date(liveNow), [liveNow]);
+
+  // Real-time progress for every saved entry: how much of its scheduled
+  // Morning/Afternoon/Evening segments have actually elapsed against the
+  // clock right now, rather than trusting the entry's stored `hours` the
+  // instant it's added. A manually-added "8:00 AM–5:00 PM" entry for today
+  // logged at 7:59 AM contributes 0 hours until 8:00 AM actually arrives,
+  // then ticks up live as the day goes on — same as a live clocked session.
+  const entryProgress = useMemo(() => {
+    const map = new Map();
+    for (const e of entries) map.set(e.id, liveEntryProgress(e, nowDate));
+    return map;
+  }, [entries, nowDate]);
+
+  // True the moment any entry has started but hasn't finished yet (its
+  // scheduled end time is still in the future) — used to gate the Reports
+  // tab and PDF export so a still-running shift can't be exported/viewed
+  // as if it were already a finished day's record.
+  const anyEntryInProgress = useMemo(
+    () => [...entryProgress.values()].some((p) => p.status === "in-progress"),
+    [entryProgress]
+  );
+  // A currently clocked-in session (Clock in button) is the same kind of
+  // "still progressing" state even though it isn't in `entries` yet.
+  const blockingExport = !!activeSession || anyEntryInProgress;
+
+  const loggedHours = useMemo(
+    () => Math.round([...entryProgress.values()].reduce((sum, p) => sum + p.liveHours, 0) * 100) / 100,
+    [entryProgress]
+  );
   const liveElapsedMs = activeSession ? elapsedMsSince(activeSession.segStartedAt) : 0;
   const liveElapsedHours = msToHours(liveElapsedMs);
   const totalHours = loggedHours + liveElapsedHours;
@@ -293,6 +344,13 @@ export default function LogbookPage() {
   // stops making sense, since that window has already closed.
   const pastLunchToday =
     !editingId && draft.date === todayStr() && (toMinutes(nowClock(new Date(liveNow))) ?? 0) >= LUNCH_OUT_AT;
+
+  // The Add-day form's currently-selected host client, and which Morning /
+  // Afternoon / Evening segments that client's own hours actually cover —
+  // used to keep the shift-coverage buttons honest for hosts whose hours
+  // don't start in the morning (e.g. 1:00 PM–8:00 PM).
+  const draftSelectedClient = clients.find((c) => c.id === draft.client) || null;
+  const draftClientCoverage = draftSelectedClient ? clientCoverage(draftSelectedClient) : null;
 
   // Milestone notifications — fire once per threshold, remembered across reloads.
   useEffect(() => {
@@ -634,16 +692,30 @@ export default function LogbookPage() {
     setDraft((d) => {
       const client = clients.find((c) => c.id === d.client);
       const norm = client ? normalizeClient(client) : null;
+      const cov = norm ? clientCoverage(norm) : null;
       const defAmIn = norm ? norm.timeIn : "08:00";
-      const defPmOut = norm ? norm.timeOut : "17:00";
+      // Afternoon "in": resumes at 1:00 PM after lunch for a client that
+      // also works mornings; for an afternoon-only host (e.g. 1:00 PM
+      // start, no Morning segment) there's no lunch to resume from, so it
+      // starts whenever that client's own hours start instead.
+      const defPmIn = norm && cov && !cov.am ? norm.timeIn : "13:00";
+      // Afternoon "out": the client's own end time — unless that end time
+      // is in the evening, in which case 5:00 PM–onward belongs to the
+      // Evening segment instead and Afternoon stops at 5:00 PM.
+      const defPmOut = norm ? (cov && cov.ev ? "17:00" : norm.timeOut) : "17:00";
+      // Evening "out" follows the client's own end time when the client
+      // actually works evenings; "in" is always the fixed 5:00 PM
+      // Afternoon/Evening boundary.
+      const defEvIn = "17:00";
+      const defEvOut = norm && cov && cov.ev ? norm.timeOut : "20:00";
       return {
         ...d,
         amIn: mode === "full" || mode === "am" ? d.amIn || defAmIn : "",
         amOut: mode === "full" || mode === "am" ? d.amOut || "12:00" : "",
-        pmIn: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmIn || "13:00" : "",
+        pmIn: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmIn || defPmIn : "",
         pmOut: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmOut || defPmOut : "",
-        evIn: mode === "ev" || mode === "pmev" ? d.evIn || "17:00" : "",
-        evOut: mode === "ev" || mode === "pmev" ? d.evOut || "20:00" : "",
+        evIn: mode === "ev" || mode === "pmev" ? d.evIn || defEvIn : "",
+        evOut: mode === "ev" || mode === "pmev" ? d.evOut || defEvOut : "",
       };
     });
   }
@@ -658,12 +730,32 @@ export default function LogbookPage() {
   function handleClientChange(clientId) {
     const client = clientId ? clients.find((c) => c.id === clientId) : null;
     const norm = client ? normalizeClient(client) : null;
+    const cov = norm ? clientCoverage(norm) : null;
     setDraft((d) => ({
       ...d,
       client: clientId,
       amIn: d.amIn && norm ? norm.timeIn : d.amIn,
-      pmOut: d.pmOut && norm ? norm.timeOut : d.pmOut,
+      pmIn: d.pmIn && norm ? (cov && !cov.am ? norm.timeIn : "13:00") : d.pmIn,
+      pmOut: d.pmOut && norm ? (cov && cov.ev ? "17:00" : norm.timeOut) : d.pmOut,
+      evOut: d.evOut && norm ? (cov && cov.ev ? norm.timeOut : d.evOut) : d.evOut,
     }));
+    // A host client's own hours cap which shift-coverage options actually
+    // make sense (e.g. picking a 1:00 PM–8:00 PM afternoon-only client
+    // while "Morning only" or "Whole day" was selected). If the current
+    // coverage no longer fits this client, fall back to the first coverage
+    // that does and explain why.
+    const allowed = coverageOptionsFor(draft.category, pastLunchToday, cov);
+    if (client && !allowed.includes(draftMode)) {
+      const fallback = allowed[0] || "pm";
+      setShiftMode(fallback);
+      notify({
+        type: "info",
+        title: `Switched to ${COVERAGE_META[fallback]?.label || "a different coverage"}`,
+        message: `"${client.name}"'s hours are ${formatTime12(norm.timeIn)}–${formatTime12(norm.timeOut)}, which doesn't include a ${
+          COVERAGE_META[draftMode]?.label || "this"
+        } segment — this entry now covers ${COVERAGE_META[fallback]?.label || "a different segment"} instead.`,
+      });
+    }
   }
 
   // Shift type drives which coverage options are even available (Evening /
@@ -679,7 +771,9 @@ export default function LogbookPage() {
     setDraft((d) => ({ ...d, category: nextCategory }));
     const eveningCapable = nextCategory === "overtime" || nextCategory === "evening";
     const nowMinutes = toMinutes(nowClock(new Date(liveNow))) ?? 0;
-    const allowed = coverageOptionsFor(nextCategory, pastLunchToday);
+    const selectedClient = clients.find((c) => c.id === draft.client);
+    const clientCov = selectedClient ? clientCoverage(selectedClient) : null;
+    const allowed = coverageOptionsFor(nextCategory, pastLunchToday, clientCov);
     if (eveningCapable && draft.date === todayStr() && nowMinutes >= EVENING_STARTS_AT && draftMode === "full") {
       setShiftMode("pmev");
       notify({
@@ -926,6 +1020,21 @@ export default function LogbookPage() {
   }
 
   async function exportPDF() {
+    // Real-time gate: a report is a record of finished duty hours, so it
+    // can't be generated while any entry is still mid-shift (started but
+    // its scheduled end hasn't been reached yet) or while a live session is
+    // actively clocked in. This mirrors the same rule the Reports tab uses.
+    if (blockingExport) {
+      notify({
+        type: "warning",
+        title: "Still tracking today's shift",
+        message: activeSession
+          ? "You're currently clocked in. Clock out first, then export or view your report."
+          : "Today's logged hours are still in progress against the clock. Wait until the scheduled shift finishes, then export or view your report.",
+      });
+      return;
+    }
+
     setExporting(true);
     let jsPDF, autoTable;
     try {
@@ -950,6 +1059,12 @@ export default function LogbookPage() {
     const pageW = doc.internal.pageSize.getWidth();
     const margin = 40;
     const generatedAt = new Date();
+
+    // Only entries that have actually happened (in progress or already
+    // complete against the clock) belong in a report — a future-dated or
+    // not-yet-started-today entry hasn't produced any real hours yet, so
+    // it's left out rather than printed as if it already occurred.
+    const reportableEntries = entries.filter((e) => entryProgress.get(e.id)?.status !== "upcoming");
 
     // ---------- Header band ----------
     doc.setFillColor(22, 33, 28); // --ink
@@ -983,7 +1098,7 @@ export default function LogbookPage() {
     doc.text(`Host Agency/Clients: ${clients.map((c) => c.name).join(", ") || "—"}`, margin + 230, y);
     y += 15;
     doc.text(`Required Hours: ${targetHours}h`, margin, y);
-    doc.text(`Report Period: ${entries.length ? `${entries[0].date} to ${entries[entries.length - 1].date}` : "—"}`, margin + 230, y);
+    doc.text(`Report Period: ${reportableEntries.length ? `${reportableEntries[0].date} to ${reportableEntries[reportableEntries.length - 1].date}` : "—"}`, margin + 230, y);
     y += 15;
     const periodLabel = { daily: "Daily (every logged entry)", weekly: "Weekly summary", monthly: "Monthly summary" }[exportPeriod];
     doc.text(`Report Type: ${periodLabel}`, margin, y);
@@ -1033,7 +1148,7 @@ export default function LogbookPage() {
       // Every entry, with a Completion column showing whether the actual
       // hours logged met the standard expectation for that entry's own
       // shift coverage (Whole day / Morning only / Afternoon → Evening…).
-      const rows = entries.map((e) => {
+      const rows = reportableEntries.map((e) => {
         const c = completionFor(e);
         return [
           formatDateLong(e.date),
@@ -1081,7 +1196,7 @@ export default function LogbookPage() {
       // hours, and how many of that period's days fully met their own
       // shift-coverage expectation vs fell short.
       const groups = new Map();
-      for (const e of entries) {
+      for (const e of reportableEntries) {
         const key = exportPeriod === "weekly" ? startOfWeek(e.date) : monthKey(e.date);
         if (!groups.has(key)) {
           groups.set(key, { key, days: 0, am: 0, pm: 0, ev: 0, regular: 0, evening: 0, overtime: 0, hours: 0, complete: 0, short: 0 });
@@ -1140,7 +1255,7 @@ export default function LogbookPage() {
     doc.setFontSize(11);
     doc.text("Hourly Breakdown — Morning / Afternoon / Evening", margin, hourlyY);
 
-    const hourlyTotals = entries.reduce(
+    const hourlyTotals = reportableEntries.reduce(
       (acc, e) => {
         if (e.amIn && e.amOut) acc.am += hoursBetween(e.amIn, e.amOut);
         if (e.pmIn && e.pmOut) acc.pm += hoursBetween(e.pmIn, e.pmOut);
@@ -1270,7 +1385,7 @@ export default function LogbookPage() {
               <div className="ring-percent">{Math.round(percent)}%</div>
             </ProgressRing>
             <div className="ring-footnote">
-              <span>{formatHours(remaining)} remaining</span>
+              <span className="remaining-chip">{formatHours(remaining)} still required</span>
               {overtimeHours > 0 && <span className="ot-chip">{formatHours(overtimeHours)} overtime</span>}
             </div>
           </div>
@@ -1515,17 +1630,46 @@ export default function LogbookPage() {
                   <span data-label="Afternoon">{e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—"}</span>
                   <span data-label="Evening">{e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—"}</span>
                   <span className="ledger-hours" data-label="Hours">
-                    {formatHours(e.hours)}
                     {(() => {
+                      const p = entryProgress.get(e.id);
+                      if (p && p.status === "upcoming") {
+                        return (
+                          <>
+                            {formatHours(0)}
+                            <span className="completion-badge is-upcoming" title={`Scheduled for ${formatHours(p.scheduledHours)} — hasn't started yet`}>
+                              Scheduled
+                            </span>
+                          </>
+                        );
+                      }
+                      if (p && p.status === "in-progress") {
+                        const livePct = p.scheduledHours > 0 ? Math.min((p.liveHours / p.scheduledHours) * 100, 100) : 0;
+                        return (
+                          <>
+                            {formatHours(p.liveHours)}
+                            <span className="completion-badge is-progress" title={`${formatHours(p.liveHours)} elapsed of ${formatHours(p.scheduledHours)} scheduled — still running`}>
+                              <span className="live-dot" /> In progress
+                            </span>
+                            <span className="inline-progress-track" aria-hidden="true">
+                              <span className="inline-progress-fill" style={{ width: `${livePct}%` }} />
+                            </span>
+                          </>
+                        );
+                      }
                       const c = completionFor(e);
-                      return c.met ? (
-                        <span className="completion-badge is-met" title="Met the expected hours for this shift coverage">
-                          Complete
-                        </span>
-                      ) : (
-                        <span className="completion-badge is-short" title={`Short ${formatHours(Math.abs(c.delta))} of the expected ${formatHours(c.expected)}`}>
-                          −{formatHours(Math.abs(c.delta))}
-                        </span>
+                      return (
+                        <>
+                          {formatHours(e.hours)}
+                          {c.met ? (
+                            <span className="completion-badge is-met" title="Met the expected hours for this shift coverage">
+                              Complete
+                            </span>
+                          ) : (
+                            <span className="completion-badge is-short" title={`Short ${formatHours(Math.abs(c.delta))} of the expected ${formatHours(c.expected)}`}>
+                              −{formatHours(Math.abs(c.delta))}
+                            </span>
+                          )}
+                        </>
                       );
                     })()}
                   </span>
@@ -1556,8 +1700,8 @@ export default function LogbookPage() {
 
               <div className="shift-mode-row">
                 <label className="shift-mode-label">Shift coverage</label>
-                <div className={`shift-mode-toggle count-${coverageOptionsFor(draft.category, pastLunchToday).length}`}>
-                  {coverageOptionsFor(draft.category, pastLunchToday).map((key) => {
+                <div className={`shift-mode-toggle count-${coverageOptionsFor(draft.category, pastLunchToday, draftClientCoverage).length}`}>
+                  {coverageOptionsFor(draft.category, pastLunchToday, draftClientCoverage).map((key) => {
                     const meta = COVERAGE_META[key];
                     const Icon = meta.icon;
                     return (
@@ -1575,6 +1719,12 @@ export default function LogbookPage() {
                 {pastLunchToday && (
                   <span className="field-hint">
                     It's already past 12:00 PM, so Morning / Whole day isn't available for today's entry.
+                  </span>
+                )}
+                {!pastLunchToday && draftSelectedClient && draftClientCoverage && !(draftClientCoverage.am && draftClientCoverage.pm) && (
+                  <span className="field-hint">
+                    "{draftSelectedClient.name}"'s hours are {formatTime12(normalizeClient(draftSelectedClient).timeIn)}–
+                    {formatTime12(normalizeClient(draftSelectedClient).timeOut)}, so only coverage that fits those hours is shown.
                   </span>
                 )}
               </div>
@@ -1731,10 +1881,28 @@ export default function LogbookPage() {
                   <option value="weekly">Weekly summary</option>
                   <option value="monthly">Monthly summary</option>
                 </select>
-                <button className="export-btn" onClick={exportPDF} disabled={exporting}>
-                  <FileDown size={14} /> {exporting ? "Preparing report…" : "Export PDF Report"}
+                <button
+                  className="export-btn"
+                  onClick={exportPDF}
+                  disabled={exporting || blockingExport}
+                  title={
+                    blockingExport
+                      ? activeSession
+                        ? "You're currently clocked in — clock out first to export a report."
+                        : "Today's shift is still in progress against the clock — the report will be available once it finishes."
+                      : undefined
+                  }
+                >
+                  <FileDown size={14} /> {exporting ? "Preparing report…" : blockingExport ? "Shift in progress…" : "Export PDF Report"}
                 </button>
               </div>
+              {blockingExport && (
+                <span className="export-blocked-note">
+                  {activeSession
+                    ? "You're clocked in right now — clock out to unlock report export."
+                    : "A logged shift for today hasn't reached its scheduled end time yet — report export unlocks once it does."}
+                </span>
+              )}
               <span className="save-note">
                 {saveState === "saving"
                   ? "Saving…"
@@ -1748,7 +1916,7 @@ export default function LogbookPage() {
           </section>
         ) : (
           <section className="reports-card">
-            <ReportsPanel entries={entries} clients={clients} />
+            <ReportsPanel entries={entries} clients={clients} now={nowDate} blockingExport={blockingExport} />
           </section>
         )}
 

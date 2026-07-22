@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
-import { Sun, Sunset, Moon, Users, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Sun, Sunset, Moon, Users, CheckCircle2, AlertTriangle, Clock3, CalendarClock } from "lucide-react";
 import { formatHours, hoursBetween, formatTime12, formatDateReport } from "../../utils/time";
 import { completionFor, COVERAGE_SHORT_LABEL } from "../../utils/dutyStatus";
+import { liveEntryProgress } from "../../utils/liveProgress";
 
 const CATEGORY_META = {
   regular: { label: "Regular", swatch: "var(--brass)" },
@@ -9,29 +10,57 @@ const CATEGORY_META = {
   overtime: { label: "Overtime", swatch: "var(--rust)" },
 };
 
-export default function ReportsPanel({ entries, clients }) {
+// Reports are a record of what's actually happened, not what's been typed
+// in — so every figure on this tab is driven off each entry's real-time
+// progress (see utils/liveProgress.js) rather than its raw stored `hours`.
+// An entry scheduled for later today (or a future date) contributes
+// nothing yet; an entry mid-shift right now contributes only what's
+// elapsed so far and ticks upward live; only a finished entry counts its
+// full hours.
+export default function ReportsPanel({ entries, clients, now = new Date(), blockingExport = false }) {
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "Unassigned";
+
+  // Real-time status for every entry, recomputed each time `now` ticks.
+  const progressById = useMemo(() => {
+    const map = new Map();
+    for (const e of entries) map.set(e.id, liveEntryProgress(e, now));
+    return map;
+  }, [entries, now]);
+
+  // Entries that have actually started — anything still purely "upcoming"
+  // (a future date, or dated today but its start time hasn't arrived) isn't
+  // real data yet, so it's excluded from every figure below rather than
+  // being counted as if it already happened.
+  const activeEntries = useMemo(
+    () => entries.filter((e) => progressById.get(e.id)?.status !== "upcoming"),
+    [entries, progressById]
+  );
+  const upcomingCount = entries.length - activeEntries.length;
+
+  // Live hours to actually credit an entry with right now: full stored
+  // hours once it's complete, only the elapsed portion while in progress.
+  const liveHoursOf = (e) => progressById.get(e.id)?.liveHours ?? e.hours;
 
   const byClient = useMemo(() => {
     const map = new Map();
-    for (const e of entries) {
+    for (const e of activeEntries) {
       const key = e.client || "unassigned";
       if (!map.has(key)) map.set(key, { id: key, hours: 0, days: 0, last: null });
       const bucket = map.get(key);
-      bucket.hours += e.hours;
+      bucket.hours += liveHoursOf(e);
       bucket.days += 1;
       if (!bucket.last || e.date > bucket.last) bucket.last = e.date;
     }
     return [...map.values()].sort((a, b) => b.hours - a.hours);
-  }, [entries]);
+  }, [activeEntries, progressById]);
 
   const byCategory = useMemo(() => {
     const totals = { regular: 0, evening: 0, overtime: 0 };
-    for (const e of entries) totals[e.category] = (totals[e.category] || 0) + e.hours;
+    for (const e of activeEntries) totals[e.category] = (totals[e.category] || 0) + liveHoursOf(e);
     return totals;
-  }, [entries]);
+  }, [activeEntries, progressById]);
 
-  const grandTotal = entries.reduce((s, e) => s + e.hours, 0);
+  const grandTotal = activeEntries.reduce((s, e) => s + liveHoursOf(e), 0);
   const maxClientHours = Math.max(1, ...byClient.map((b) => b.hours));
   const maxCategoryHours = Math.max(1, ...Object.values(byCategory));
 
@@ -39,21 +68,25 @@ export default function ReportsPanel({ entries, clients }) {
     let morning = 0;
     let afternoon = 0;
     let evening = 0;
-    for (const e of entries) {
-      if (e.amIn && e.amOut) morning += hoursBetween(e.amIn, e.amOut);
-      if (e.pmIn && e.pmOut) afternoon += hoursBetween(e.pmIn, e.pmOut);
-      if (e.evIn && e.evOut) evening += hoursBetween(e.evIn, e.evOut);
+    for (const e of activeEntries) {
+      const p = progressById.get(e.id);
+      for (const seg of p?.segments || []) {
+        if (seg.key === "am") morning += seg.live;
+        if (seg.key === "pm") afternoon += seg.live;
+        if (seg.key === "ev") evening += seg.live;
+      }
     }
     return { morning, afternoon, evening };
-  }, [entries]);
+  }, [activeEntries, progressById]);
   const maxDayPart = Math.max(1, dayPart.morning, dayPart.afternoon, dayPart.evening);
 
-  // Chronological (newest-first) breakdown of every entry — exact date,
-  // weekday, and the precise time range for whichever segment(s) (Morning /
-  // Afternoon / Evening) that entry actually covers, based on its shift
-  // coverage. This is the "detailed report" view: what, when, and how long.
+  // Chronological (newest-first) breakdown of every entry that's actually
+  // started — exact date, weekday, and the precise time range for
+  // whichever segment(s) (Morning / Afternoon / Evening) that entry
+  // covers, plus its real-time status. This is the "detailed report" view:
+  // what, when, how long, and whether it's still running right now.
   const detailedLog = useMemo(() => {
-    return entries
+    return activeEntries
       .slice()
       .sort((a, b) => b.date.localeCompare(a.date))
       .map((e) => {
@@ -64,18 +97,26 @@ export default function ReportsPanel({ entries, clients }) {
           segments.push({ key: "pm", label: "Afternoon", Icon: Sunset, range: `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}`, hours: hoursBetween(e.pmIn, e.pmOut) });
         if (e.evIn && e.evOut)
           segments.push({ key: "ev", label: "Evening", Icon: Moon, range: `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}`, hours: hoursBetween(e.evIn, e.evOut) });
-        return { ...e, segments, completion: completionFor(e) };
+        const progress = progressById.get(e.id);
+        return {
+          ...e,
+          segments,
+          progress,
+          liveHours: progress?.liveHours ?? e.hours,
+          completion: progress?.status === "complete" ? completionFor(e) : null,
+        };
       });
-  }, [entries]);
+  }, [activeEntries, progressById]);
 
-  // Did each logged day actually meet the standard hours for the shift
+  // Did each *finished* day actually meet the standard hours for the shift
   // coverage it was logged under (Whole day / Morning only / Afternoon →
-  // Evening…), rather than against the overall OJT target? Grouped so the
-  // person can see, at a glance, which coverage types tend to fall short.
+  // Evening…)? Still-running entries aren't judged met/short yet — there's
+  // no verdict to give until the clock says the shift is actually over.
   const completionSummary = useMemo(() => {
+    const finished = activeEntries.filter((e) => progressById.get(e.id)?.status === "complete");
     const byCoverage = new Map();
     let metCount = 0;
-    for (const e of entries) {
+    for (const e of finished) {
       const c = completionFor(e);
       if (c.met) metCount += 1;
       if (!byCoverage.has(c.coverage)) byCoverage.set(c.coverage, { coverage: c.coverage, met: 0, short: 0, shortfallHours: 0 });
@@ -87,23 +128,51 @@ export default function ReportsPanel({ entries, clients }) {
       }
     }
     return {
-      total: entries.length,
+      total: finished.length,
       met: metCount,
-      short: entries.length - metCount,
+      short: finished.length - metCount,
       byCoverage: [...byCoverage.values()].sort((a, b) => b.met + b.short - (a.met + a.short)),
     };
-  }, [entries]);
+  }, [activeEntries, progressById]);
 
-  if (entries.length === 0) {
+  // No report to show at all until at least one entry has actually
+  // started against the clock — a bunch of scheduled-but-not-yet-due
+  // entries isn't reportable data yet.
+  if (activeEntries.length === 0) {
     return (
       <div className="reports-empty">
-        No entries yet. Clock in or add a day in the Logbook tab to see your reports.
+        {entries.length === 0
+          ? "No entries yet. Clock in or add a day in the Logbook tab to see your reports."
+          : "Your logged shift hasn't started yet against the clock — this report will populate in real time once it does."}
       </div>
     );
   }
 
   return (
     <div className="reports-grid">
+      {(blockingExport || upcomingCount > 0) && (
+        <div className="report-card report-card--wide reports-live-banner">
+          {blockingExport && (
+            <div className="live-banner-row is-progress">
+              <Clock3 size={15} />
+              <span>
+                Today's shift is still running against the clock — the numbers below are updating in real time, and
+                PDF export is locked until it finishes.
+              </span>
+            </div>
+          )}
+          {upcomingCount > 0 && (
+            <div className="live-banner-row is-upcoming">
+              <CalendarClock size={15} />
+              <span>
+                {upcomingCount} scheduled {upcomingCount === 1 ? "entry hasn't" : "entries haven't"} started yet and{" "}
+                {upcomingCount === 1 ? "isn't" : "aren't"} included below yet.
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="report-card">
         <h3>Morning vs. afternoon vs. evening hours</h3>
         <div className="bar-list">
@@ -248,21 +317,34 @@ export default function ReportsPanel({ entries, clients }) {
                 <span className="timeline-date">{formatDateReport(e.date)}</span>
                 <span className="timeline-head-tags">
                   <span className={`tag tag-${e.category}`}>{CATEGORY_META[e.category].label}</span>
-                  <span className={`completion-badge ${e.completion.met ? "is-met" : "is-short"}`}>
-                    {e.completion.met ? "Complete" : `−${formatHours(Math.abs(e.completion.delta))}`}
-                  </span>
+                  {e.progress?.status === "in-progress" ? (
+                    <span className="completion-badge is-progress" title={`${formatHours(e.liveHours)} elapsed of ${formatHours(e.progress.scheduledHours)} scheduled — still running`}>
+                      <span className="live-dot" /> In progress
+                    </span>
+                  ) : e.completion ? (
+                    <span className={`completion-badge ${e.completion.met ? "is-met" : "is-short"}`}>
+                      {e.completion.met ? "Complete" : `−${formatHours(Math.abs(e.completion.delta))}`}
+                    </span>
+                  ) : null}
                 </span>
               </div>
               <div className="timeline-segs">
-                {e.segments.map((s) => (
-                  <span className="timeline-seg" key={s.key}>
-                    <s.Icon size={12} /> {s.label}: {s.range} <em>({formatHours(s.hours)})</em>
-                  </span>
-                ))}
+                {e.segments.map((s) => {
+                  const segProgress = e.progress?.segments?.find((x) => x.key === s.key);
+                  const segLive = segProgress?.status === "in-progress";
+                  return (
+                    <span className={`timeline-seg${segLive ? " is-live" : ""}`} key={s.key}>
+                      <s.Icon size={12} /> {s.label}: {s.range}{" "}
+                      <em>({segLive ? `${formatHours(segProgress.live)} so far` : formatHours(s.hours)})</em>
+                    </span>
+                  );
+                })}
               </div>
               <div className="timeline-meta">
                 <span className="timeline-client"><Users size={11} /> {clientName(e.client)}</span>
-                <span className="timeline-total">Total for the day: {formatHours(e.hours)}</span>
+                <span className="timeline-total">
+                  {e.progress?.status === "in-progress" ? "Elapsed so far" : "Total for the day"}: {formatHours(e.liveHours)}
+                </span>
               </div>
               {e.task && <div className="timeline-task">“{e.task}”</div>}
             </div>
