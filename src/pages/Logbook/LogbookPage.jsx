@@ -154,6 +154,15 @@ export default function LogbookPage() {
   const [scrolled, setScrolled] = useState(false);
   const [studentName, setStudentName] = useState("");
   const [targetHours, setTargetHours] = useState(486);
+  // Raw text the "Required hours" field displays, kept separate from the
+  // numeric targetHours used everywhere else. Binding the input straight to
+  // a number (value={targetHours}) hits a known React/browser quirk with
+  // type="number": once the field shows "0" and you keep typing, the
+  // browser's own text can end up as "0486" while React's numeric value is
+  // already the correct 486 — so the progress ring shows 486 but the box
+  // itself still shows the stray leading zero. Using a plain string here
+  // sidesteps that entirely.
+  const [targetHoursInput, setTargetHoursInput] = useState("486");
   const [clients, setClients] = useState([]);
   const [lastClientId, setLastClientId] = useState(null); // most recently clocked-in client — drives the shift-start reminder
   const [entries, setEntries] = useState([]);
@@ -225,7 +234,9 @@ export default function LogbookPage() {
       const raw = getUserStorage(STORAGE_KEY, userId);
       if (raw) {
         setStudentName(raw.studentName || user?.name || "");
-        setTargetHours(typeof raw.targetHours === "number" ? raw.targetHours : 486);
+        const savedHours = typeof raw.targetHours === "number" ? raw.targetHours : 486;
+        setTargetHours(savedHours);
+        setTargetHoursInput(String(savedHours));
         setClients(Array.isArray(raw.clients) ? raw.clients : []);
         setEntries(Array.isArray(raw.entries) ? raw.entries : []);
         setLastClientId(raw.lastClientId || null);
@@ -234,6 +245,7 @@ export default function LogbookPage() {
         // keeping whatever the previously signed-in account had loaded.
         setStudentName(user?.name || "");
         setTargetHours(486);
+        setTargetHoursInput("486");
         setClients([]);
         setEntries([]);
         setLastClientId(null);
@@ -402,19 +414,30 @@ export default function LogbookPage() {
   // client's own hours, set on the Host clients form, always win).
   // Overtime is left manual/open-ended since it's meant to run past the
   // standard hours — the trainee clocks it out themselves.
+  //
+  // When a Morning segment starts with a host client assigned, the time-in
+  // that gets recorded is that client's own scheduled start (e.g. 7:00 AM
+  // for a Mon–Thu, 7:00 AM–6:00 PM host) rather than the exact second the
+  // Clock in button was tapped — matching a standard DTR, where the log
+  // reflects the shift's official hours, not the trainee's literal
+  // keystroke. The Afternoon end already works the same way: it's the auto
+  // clock-out at the client's scheduled end time that saves the entry, so
+  // "afternoon out" always lands on that client's own hours too.
   function clockIn() {
     if (activeSession) return;
     const nowC = nowClock();
     const nowMin = toMinutes(nowC) ?? 0;
     const client = clients.find((c) => c.id === sessionClient);
-    const dayEndAt = client ? toMinutes(normalizeClient(client).timeOut) ?? PM_END_AT : PM_END_AT;
+    const norm = client ? normalizeClient(client) : null;
+    const dayEndAt = norm ? toMinutes(norm.timeOut) ?? PM_END_AT : PM_END_AT;
     const phase = nowMin >= dayEndAt ? "ev" : nowMin >= LUNCH_OUT_AT ? "pm" : "am";
+    const segStart = phase === "am" && norm ? norm.timeIn : nowC;
     const session = {
       client: sessionClient || null,
       category: sessionCategory,
       date: todayStr(),
       phase,
-      segStart: nowC,
+      segStart,
       segStartedAt: new Date().toISOString(),
       autoManage: sessionCategory !== "overtime",
       amSaved: false,
@@ -425,7 +448,10 @@ export default function LogbookPage() {
     notify({
       type: "info",
       title: "Clocked in",
-      message: `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}.`,
+      message:
+        phase === "am" && norm
+          ? `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}, per ${client.name}'s schedule.`
+          : `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}.`,
     });
   }
 
@@ -1305,10 +1331,27 @@ export default function LogbookPage() {
           <div className="setup-field small">
             <label>Required hours</label>
             <input
-              type="number"
-              min="1"
-              value={targetHours}
-              onChange={(e) => setTargetHours(Number(e.target.value) || 0)}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={targetHoursInput}
+              onChange={(e) => {
+                // Digits only — also strips any leading zeros as the user
+                // types (e.g. "0" + "4" no longer sits as "04").
+                const digits = e.target.value.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+                setTargetHoursInput(digits);
+                setTargetHours(digits ? Number(digits) : 0);
+              }}
+              onBlur={() => {
+                // Only fall back to a default once the field is actually
+                // left empty (or invalid) on blur — not the instant a digit
+                // is deleted, so clearing the box to retype a new number
+                // doesn't keep snapping back to a stray "0".
+                const parsed = Number(targetHoursInput);
+                const safe = targetHoursInput && parsed > 0 ? parsed : 486;
+                setTargetHours(safe);
+                setTargetHoursInput(String(safe));
+              }}
             />
           </div>
           <div className="setup-field grow">
