@@ -194,8 +194,9 @@ export default function LogbookPage() {
   const shiftReminderFiredRef = useRef(getUserStorage(REMINDER_KEY, userId));
 
   useEffect(() => {
-    document.title = "Duty Log | OJT — " + (user?.school || "Opol Community College");
-  }, [user]);
+    const pageName = tab === "reports" ? "Reports" : "Logbook";
+    document.title = `${pageName} | Logbook - Opol Community College`;
+  }, [tab]);
 
   // One-time heads-up if this browser can't reliably persist data (storage
   // disabled, full, or a private/incognito window that wipes on close).

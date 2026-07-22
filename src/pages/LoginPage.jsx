@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import GoogleSignInButton from "../components/GoogleSignInButton";
@@ -9,6 +9,10 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    document.title = "Login | Logbook - Opol Community College";
+  }, []);
 
   const handleSuccess = useCallback(
     (profile) => {

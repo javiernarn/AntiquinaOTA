@@ -10,7 +10,7 @@ export default function MainPage() {
   const justSignedIn = location.state?.from === "login";
 
   useEffect(() => {
-    document.title = "Loading | OJT Logbook - Opol Community College";
+    document.title = "Loading | Logbook - Opol Community College";
   }, []);
 
   useEffect(() => {
