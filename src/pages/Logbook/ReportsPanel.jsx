@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
-import { Sun, Sunset, Moon, Users } from "lucide-react";
+import { Sun, Sunset, Moon, Users, CheckCircle2, AlertTriangle } from "lucide-react";
 import { formatHours, hoursBetween, formatTime12, formatDateReport } from "../../utils/time";
+import { completionFor, COVERAGE_SHORT_LABEL } from "../../utils/dutyStatus";
 
 const CATEGORY_META = {
   regular: { label: "Regular", swatch: "var(--brass)" },
@@ -63,8 +64,34 @@ export default function ReportsPanel({ entries, clients }) {
           segments.push({ key: "pm", label: "Afternoon", Icon: Sunset, range: `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}`, hours: hoursBetween(e.pmIn, e.pmOut) });
         if (e.evIn && e.evOut)
           segments.push({ key: "ev", label: "Evening", Icon: Moon, range: `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}`, hours: hoursBetween(e.evIn, e.evOut) });
-        return { ...e, segments };
+        return { ...e, segments, completion: completionFor(e) };
       });
+  }, [entries]);
+
+  // Did each logged day actually meet the standard hours for the shift
+  // coverage it was logged under (Whole day / Morning only / Afternoon →
+  // Evening…), rather than against the overall OJT target? Grouped so the
+  // person can see, at a glance, which coverage types tend to fall short.
+  const completionSummary = useMemo(() => {
+    const byCoverage = new Map();
+    let metCount = 0;
+    for (const e of entries) {
+      const c = completionFor(e);
+      if (c.met) metCount += 1;
+      if (!byCoverage.has(c.coverage)) byCoverage.set(c.coverage, { coverage: c.coverage, met: 0, short: 0, shortfallHours: 0 });
+      const bucket = byCoverage.get(c.coverage);
+      if (c.met) bucket.met += 1;
+      else {
+        bucket.short += 1;
+        bucket.shortfallHours += Math.abs(c.delta);
+      }
+    }
+    return {
+      total: entries.length,
+      met: metCount,
+      short: entries.length - metCount,
+      byCoverage: [...byCoverage.values()].sort((a, b) => b.met + b.short - (a.met + a.short)),
+    };
   }, [entries]);
 
   if (entries.length === 0) {
@@ -160,6 +187,55 @@ export default function ReportsPanel({ entries, clients }) {
         </div>
       </div>
 
+      <div className="report-card">
+        <h3>Shift coverage completion</h3>
+        <div className="completion-summary">
+          <div className="completion-stat completion-stat--met">
+            <CheckCircle2 size={16} />
+            <div>
+              <strong>{completionSummary.met}</strong>
+              <span>day{completionSummary.met === 1 ? "" : "s"} met the hours for their shift coverage</span>
+            </div>
+          </div>
+          <div className="completion-stat completion-stat--short">
+            <AlertTriangle size={16} />
+            <div>
+              <strong>{completionSummary.short}</strong>
+              <span>day{completionSummary.short === 1 ? "" : "s"} came in short</span>
+            </div>
+          </div>
+        </div>
+        <div className="bar-list completion-breakdown">
+          {completionSummary.byCoverage.map((b) => {
+            const total = b.met + b.short;
+            return (
+              <div className="bar-row" key={b.coverage}>
+                <div className="bar-row-head">
+                  <span className="bar-name">{COVERAGE_SHORT_LABEL[b.coverage] || b.coverage}</span>
+                  <span className="bar-value">
+                    {b.met}/{total} complete
+                  </span>
+                </div>
+                <div className="bar-track">
+                  <div
+                    className="bar-fill"
+                    style={{
+                      width: `${(b.met / total) * 100}%`,
+                      background: b.met === total ? "var(--teal)" : "var(--brass)",
+                    }}
+                  />
+                </div>
+                {b.short > 0 && (
+                  <div className="bar-meta">
+                    Short a combined {formatHours(b.shortfallHours)} across {b.short} {b.short === 1 ? "day" : "days"}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="report-card report-card--wide">
         <h3>Detailed duty log</h3>
         <p className="report-card-sub">
@@ -170,7 +246,12 @@ export default function ReportsPanel({ entries, clients }) {
             <div className="timeline-item" key={e.id}>
               <div className="timeline-head">
                 <span className="timeline-date">{formatDateReport(e.date)}</span>
-                <span className={`tag tag-${e.category}`}>{CATEGORY_META[e.category].label}</span>
+                <span className="timeline-head-tags">
+                  <span className={`tag tag-${e.category}`}>{CATEGORY_META[e.category].label}</span>
+                  <span className={`completion-badge ${e.completion.met ? "is-met" : "is-short"}`}>
+                    {e.completion.met ? "Complete" : `−${formatHours(Math.abs(e.completion.delta))}`}
+                  </span>
+                </span>
               </div>
               <div className="timeline-segs">
                 {e.segments.map((s) => (

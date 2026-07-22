@@ -284,8 +284,33 @@ select {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
-.ledger-hours { font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600; }
+.ledger-hours {
+  font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+}
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
+
+/* ---------- Completion badge: did this entry meet the standard hours for
+   its own shift coverage (Whole day / Morning only / etc.)? ---------- */
+.completion-badge {
+  font-family: 'Inter', sans-serif;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.2px;
+  padding: 1.5px 6px; border-radius: 999px; white-space: nowrap;
+}
+.completion-badge.is-met { background: var(--teal-soft); color: var(--teal); }
+.completion-badge.is-short { background: var(--rust-soft); color: var(--rust); }
+
+/* ---------- Export controls: report-period selector + the export button ---------- */
+.export-controls { display: flex; align-items: center; gap: 8px; }
+.export-period-select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  background: var(--card);
+  color: var(--ink);
+}
+.export-period-select:focus { outline: none; border-color: var(--brass); }
 
 .tag {
   font-size: 10.5px; font-weight: 600;
@@ -395,8 +420,6 @@ select {
   gap: 8px;
   align-items: end;
 }
-.ledger-new-grid > .new-field { flex: 1 1 110px; }
-.ledger-new-grid > .new-field.small { flex: 0 1 90px; }
 .ledger-new-grid.secondary > .new-field { flex: 1 1 160px; }
 .ledger-new-grid.secondary > .new-field.grow { flex: 2 1 220px; }
 .new-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -418,7 +441,62 @@ select {
 .required-mark { color: var(--danger); }
 .new-field select.field-required { border-color: var(--rust); background: var(--rust-soft); }
 .field-hint {
-  font-size: 10px; color: var(--ink-soft); font-style: italic; line-height: 1.3; margin-top: 2px;
+  display: block;
+  font-size: 10.5px; color: var(--ink-soft); font-style: italic; line-height: 1.3; margin-top: 6px;
+}
+
+/* ---------- Date field (its own row, never fights another field for space) ---------- */
+.date-field { max-width: 220px; margin-bottom: 2px; }
+.date-field input { font-weight: 600; }
+
+/* ---------- Segment groups: Morning / Afternoon / Evening, each a clearly
+   bounded card so its two time inputs never collide with a neighboring
+   segment's fields or with the Total summary. ---------- */
+.segment-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.segment-group {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+.segment-group-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 9px;
+}
+.segment-am .segment-group-title { color: #8A6A22; }
+.segment-pm .segment-group-title { color: var(--evening); }
+.segment-ev .segment-group-title { color: var(--rust); }
+.segment-group-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.segment-group-fields .new-field { min-width: 0; }
+
+/* ---------- Total strip: a distinct full-width summary bar, always on its
+   own row below every segment group so it never overlaps a time input. ---------- */
+.total-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--teal-soft);
+  border-radius: 9px;
+  padding: 10px 14px;
+}
+.total-strip-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--teal); font-weight: 700;
+}
+.total-strip-value {
+  font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 700;
+  color: var(--teal);
 }
 
 .editing-banner {
@@ -438,11 +516,6 @@ select {
   white-space: nowrap;
 }
 .cancel-edit-btn:hover { border-color: var(--rust); color: var(--rust); }
-.new-hours {
-  font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700;
-  color: var(--teal); text-align: center; background: var(--teal-soft);
-  border-radius: 7px; padding: 7px 0;
-}
 .add-btn {
   background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
   padding: 9px 16px;
@@ -488,6 +561,22 @@ select {
 .report-card--wide { grid-column: 1 / -1; }
 .report-card-sub { font-size: 11.5px; color: var(--ink-soft); margin: -8px 0 14px; }
 
+/* ---------- Shift coverage completion card ---------- */
+.completion-summary { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.completion-stat {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: 10px;
+}
+.completion-stat > div { display: flex; flex-direction: column; gap: 1px; }
+.completion-stat strong { font-family: 'IBM Plex Mono', monospace; font-size: 15px; line-height: 1.2; }
+.completion-stat span { font-size: 11.5px; color: var(--ink-soft); }
+.completion-stat--met { background: var(--teal-soft); color: var(--teal); }
+.completion-stat--met strong { color: var(--teal); }
+.completion-stat--short { background: var(--rust-soft); color: var(--rust); }
+.completion-stat--short strong { color: var(--rust); }
+.completion-breakdown { padding-top: 4px; border-top: 1px solid var(--line); }
+.timeline-head-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
 .timeline-list {
   display: flex; flex-direction: column; gap: 10px;
   max-height: 520px; overflow-y: auto; padding-right: 4px;
@@ -525,7 +614,6 @@ select {
   .clock-controls { justify-content: center; }
   .duty-setup { grid-template-columns: 1fr; padding: 16px; }
   .reports-grid { grid-template-columns: 1fr; }
-  .ledger-new-grid > .new-field { flex-basis: calc(50% - 8px); }
   .ledger-new-grid.secondary > .new-field { flex-basis: 100%; }
   .new-field-actions { flex-direction: column; width: 100%; }
   .add-btn { width: 100%; padding: 11px 16px; }
@@ -608,9 +696,13 @@ select {
   .ledger-row .truncate { white-space: normal; }
   .ledger-row .row-actions { position: absolute; top: 10px; right: 10px; }
 
-  .ledger-new-grid > .new-field { flex-basis: calc(50% - 8px); }
   .ledger-footer { flex-direction: column; align-items: stretch; }
+  .export-controls { flex-direction: column; width: 100%; }
+  .export-period-select { width: 100%; }
   .export-btn { justify-content: center; width: 100%; }
+
+  .segment-groups { grid-template-columns: 1fr; }
+  .completion-badge { align-self: flex-start; }
 
   .timeline-item { padding: 10px 12px; }
   .timeline-meta { flex-direction: column; align-items: flex-start; }
@@ -618,8 +710,8 @@ select {
 
 /* ---------- Responsive: smallest phones (older/compact devices) ---------- */
 @media (max-width: 380px) {
-  .ledger-new-grid > .new-field { flex-basis: 100%; }
   .duty-setup, .duty-hero { padding: 14px; }
   .ring-footnote { font-size: 11px; }
   .shift-mode-toggle button { font-size: 10.2px; padding: 8px 2px; gap: 3px; }
+  .segment-group-fields { grid-template-columns: 1fr; }
 }

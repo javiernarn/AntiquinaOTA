@@ -138,3 +138,38 @@ export function isFutureTime(dateStr, timeStr, refDate = new Date()) {
 export function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
+
+// ---------- Week / month grouping (for Weekly / Monthly PDF + report rollups) ----------
+
+// Monday-based start-of-week date string for whatever date falls inside it.
+export function startOfWeek(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  const day = dt.getDay(); // 0 = Sun … 6 = Sat
+  const diff = (day === 0 ? -6 : 1) - day; // shift back to Monday
+  dt.setDate(dt.getDate() + diff);
+  return todayStr(dt);
+}
+
+// "Jul 21 – Jul 27, 2026" — label for a Monday-start week key.
+export function formatWeekRange(startDateStr) {
+  const [y, m, d] = startDateStr.split("-").map(Number);
+  const start = new Date(y, m - 1, d);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} – ${endLabel}`;
+}
+
+// "YYYY-MM" grouping key for a date string.
+export function monthKey(dateStr) {
+  return dateStr.slice(0, 7);
+}
+
+// "July 2026" — label for a "YYYY-MM" month key.
+export function formatMonthLabel(key) {
+  const [y, m] = key.split("-").map(Number);
+  const dt = new Date(y, m - 1, 1);
+  return dt.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}

@@ -23,10 +23,13 @@ import {
   elapsedMsSince,
   formatDuration,
   msToHours,
-  isFutureDate,
-  isFutureTime,
   rangesOverlap,
+  startOfWeek,
+  formatWeekRange,
+  monthKey,
+  formatMonthLabel,
 } from "../../utils/time";
+import { completionFor } from "../../utils/dutyStatus";
 import "./logbook.css";
 
 const STORAGE_KEY = "logbook-v2";
@@ -123,6 +126,7 @@ export default function LogbookPage() {
   const [saveState, setSaveState] = useState("idle");
   const [newClientName, setNewClientName] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [exportPeriod, setExportPeriod] = useState("daily"); // "daily" | "weekly" | "monthly" — grouping used by the PDF export
   const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" | "ev" | "pmev" — which segment(s) this manual entry covers
   const [editingId, setEditingId] = useState(null); // id of the entry currently being edited, or null when adding a new one
   const [confirmDialog, setConfirmDialog] = useState(null); // { kind: "entry" | "client", id }
@@ -401,25 +405,16 @@ export default function LogbookPage() {
   }
 
   // Checks a draft against the app's rules before it's saved: a date is
-  // required and can't be in the future, a host client is required, at
-  // least one time segment must be filled in, none of those times can be
-  // later than right now (when logging for today), and the segment(s)
-  // can't overlap a time range already logged for that same date — no
-  // duplicate "whole day" entries stacked on top of each other.
+  // required, a host client is required, at least one time segment must be
+  // filled in, and the segment(s) can't overlap a time range already
+  // logged for that same date — no duplicate "whole day" entries stacked
+  // on top of each other.
   function validateDraft(d, excludeId) {
     if (!d.date) return "Please pick a date.";
-    if (isFutureDate(d.date)) return "You can't log a future date — pick today or an earlier date.";
     if (!d.client) return "Host client is required — please select one.";
 
     const segs = draftSegments(d);
     if (segs.length === 0) return "Enter at least one time range for this entry.";
-
-    const futureField = [
-      ["amOut", d.amOut],
-      ["pmOut", d.pmOut],
-      ["evOut", d.evOut],
-    ].find(([, val]) => isFutureTime(d.date, val, new Date(liveNow)));
-    if (futureField) return "Time can't be later than the current time.";
 
     for (const e of entries) {
       if (e.id === excludeId) continue;
@@ -613,6 +608,9 @@ export default function LogbookPage() {
     y += 15;
     doc.text(`Required Hours: ${targetHours}h`, margin, y);
     doc.text(`Report Period: ${entries.length ? `${entries[0].date} to ${entries[entries.length - 1].date}` : "—"}`, margin + 230, y);
+    y += 15;
+    const periodLabel = { daily: "Daily (every logged entry)", weekly: "Weekly summary", monthly: "Monthly summary" }[exportPeriod];
+    doc.text(`Report Type: ${periodLabel}`, margin, y);
 
     y += 22;
     const summaryBoxes = [
@@ -638,49 +636,158 @@ export default function LogbookPage() {
 
     y += 64;
 
-    // ---------- Detailed daily table (Morning + Afternoon + Evening breakdown) ----------
-    const rows = entries.map((e) => [
-      formatDateLong(e.date),
-      e.amIn && e.amOut ? `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}` : "—",
-      e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—",
-      e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—",
-      formatHours(e.hours),
-      clientName(e.client),
-      categoryLabel(e.category),
-      e.task || "—",
-    ]);
+    // ---------- Footer helper (reused by every table on this report) ----------
+    const drawFooter = () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      const pageH = doc.internal.pageSize.getHeight();
+      doc.setFontSize(8);
+      doc.setTextColor(120, 130, 122);
+      doc.text(
+        `OCC Duty Log · Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`,
+        margin,
+        pageH - 24
+      );
+      doc.text("This report reflects entries logged at the time of export and updates in real time.", pageW - margin, pageH - 24, {
+        align: "right",
+      });
+    };
+
+    // ---------- Main table: Daily (every entry) / Weekly / Monthly summary ----------
+    if (exportPeriod === "daily") {
+      // Every entry, with a Completion column showing whether the actual
+      // hours logged met the standard expectation for that entry's own
+      // shift coverage (Whole day / Morning only / Afternoon → Evening…).
+      const rows = entries.map((e) => {
+        const c = completionFor(e);
+        return [
+          formatDateLong(e.date),
+          e.amIn && e.amOut ? `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}` : "—",
+          e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—",
+          e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—",
+          formatHours(e.hours),
+          c.met ? "Complete" : `Short ${formatHours(Math.abs(c.delta))}`,
+          clientName(e.client),
+          categoryLabel(e.category),
+          e.task || "—",
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [["Date", "Morning (In – Lunch)", "Afternoon (Lunch – Out)", "Evening (In – Out)", "Hours", "Completion", "Host Client", "Type", "Task / Remarks"]],
+        body: rows,
+        styles: { font: "helvetica", fontSize: 7.2, cellPadding: 4, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
+        headStyles: { fillColor: [22, 33, 28], textColor: [255, 255, 255], fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [246, 248, 246] },
+        columnStyles: {
+          0: { cellWidth: 62 },
+          1: { cellWidth: 62 },
+          2: { cellWidth: 62 },
+          3: { cellWidth: 62 },
+          4: { cellWidth: 36, halign: "center" },
+          5: { cellWidth: 46, halign: "center" },
+          6: { cellWidth: 62 },
+          7: { cellWidth: 42 },
+        },
+        didParseCell: (data) => {
+          if (data.section === "body" && data.column.index === 5) {
+            const met = data.cell.raw === "Complete";
+            data.cell.styles.textColor = met ? [31, 122, 92] : [193, 67, 46];
+            data.cell.styles.fontStyle = "bold";
+          }
+        },
+        didDrawPage: drawFooter,
+      });
+    } else {
+      // Weekly / Monthly summary: one row per period with days logged, a
+      // Morning/Afternoon/Evening hour split, hours by shift type, total
+      // hours, and how many of that period's days fully met their own
+      // shift-coverage expectation vs fell short.
+      const groups = new Map();
+      for (const e of entries) {
+        const key = exportPeriod === "weekly" ? startOfWeek(e.date) : monthKey(e.date);
+        if (!groups.has(key)) {
+          groups.set(key, { key, days: 0, am: 0, pm: 0, ev: 0, regular: 0, evening: 0, overtime: 0, hours: 0, complete: 0, short: 0 });
+        }
+        const g = groups.get(key);
+        g.days += 1;
+        if (e.amIn && e.amOut) g.am += hoursBetween(e.amIn, e.amOut);
+        if (e.pmIn && e.pmOut) g.pm += hoursBetween(e.pmIn, e.pmOut);
+        if (e.evIn && e.evOut) g.ev += hoursBetween(e.evIn, e.evOut);
+        g[e.category] = (g[e.category] || 0) + e.hours;
+        g.hours += e.hours;
+        const c = completionFor(e);
+        if (c.met) g.complete += 1;
+        else g.short += 1;
+      }
+      const sortedGroups = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+      const rows = sortedGroups.map((g) => [
+        exportPeriod === "weekly" ? formatWeekRange(g.key) : formatMonthLabel(g.key),
+        String(g.days),
+        formatHours(g.am),
+        formatHours(g.pm),
+        formatHours(g.ev),
+        formatHours(g.hours),
+        `${g.complete} / ${g.days}`,
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        margin: { left: margin, right: margin },
+        head: [[exportPeriod === "weekly" ? "Week" : "Month", "Days Logged", "Morning Hrs", "Afternoon Hrs", "Evening Hrs", "Total Hours", "Days Meeting Shift Coverage"]],
+        body: rows,
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 5, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
+        headStyles: { fillColor: [22, 33, 28], textColor: [255, 255, 255], fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [246, 248, 246] },
+        columnStyles: {
+          1: { halign: "center" },
+          2: { halign: "center" },
+          3: { halign: "center" },
+          4: { halign: "center" },
+          5: { halign: "center" },
+          6: { halign: "center" },
+        },
+        didDrawPage: drawFooter,
+      });
+    }
+
+    // ---------- Hourly breakdown: total hours per day-part across the whole report ----------
+    let hourlyY = doc.lastAutoTable.finalY + 26;
+    const pageHForHourly = doc.internal.pageSize.getHeight();
+    if (hourlyY > pageHForHourly - 140) {
+      doc.addPage();
+      hourlyY = 50;
+    }
+    doc.setTextColor(22, 33, 28);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Hourly Breakdown — Morning / Afternoon / Evening", margin, hourlyY);
+
+    const hourlyTotals = entries.reduce(
+      (acc, e) => {
+        if (e.amIn && e.amOut) acc.am += hoursBetween(e.amIn, e.amOut);
+        if (e.pmIn && e.pmOut) acc.pm += hoursBetween(e.pmIn, e.pmOut);
+        if (e.evIn && e.evOut) acc.ev += hoursBetween(e.evIn, e.evOut);
+        return acc;
+      },
+      { am: 0, pm: 0, ev: 0 }
+    );
 
     autoTable(doc, {
-      startY: y,
+      startY: hourlyY + 10,
       margin: { left: margin, right: margin },
-      head: [["Date", "Morning (In – Lunch)", "Afternoon (Lunch – Out)", "Evening (In – Out)", "Hours", "Host Client", "Type", "Task / Remarks"]],
-      body: rows,
-      styles: { font: "helvetica", fontSize: 7.6, cellPadding: 4.5, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
+      head: [["Segment", "Standard Window", "Total Hours Logged"]],
+      body: [
+        ["Morning", "8:00 AM – 12:00 PM", formatHours(hourlyTotals.am)],
+        ["Afternoon", "1:00 PM – 5:00 PM", formatHours(hourlyTotals.pm)],
+        ["Evening", "5:00 PM – 8:00 PM", formatHours(hourlyTotals.ev)],
+      ],
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 5, textColor: [22, 33, 28], lineColor: [215, 222, 212], lineWidth: 0.5 },
       headStyles: { fillColor: [22, 33, 28], textColor: [255, 255, 255], fontStyle: "bold" },
       alternateRowStyles: { fillColor: [246, 248, 246] },
-      columnStyles: {
-        0: { cellWidth: 68 },
-        1: { cellWidth: 68 },
-        2: { cellWidth: 68 },
-        3: { cellWidth: 68 },
-        4: { cellWidth: 42, halign: "center" },
-        5: { cellWidth: 72 },
-        6: { cellWidth: 48 },
-      },
-      didDrawPage: () => {
-        const pageCount = doc.internal.getNumberOfPages();
-        const pageH = doc.internal.pageSize.getHeight();
-        doc.setFontSize(8);
-        doc.setTextColor(120, 130, 122);
-        doc.text(
-          `OCC Duty Log · Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`,
-          margin,
-          pageH - 24
-        );
-        doc.text("This report reflects entries logged at the time of export and updates in real time.", pageW - margin, pageH - 24, {
-          align: "right",
-        });
-      },
+      columnStyles: { 2: { halign: "center" } },
+      didDrawPage: drawFooter,
     });
 
     // ---------- Signatures ----------
@@ -931,7 +1038,21 @@ export default function LogbookPage() {
                   <span data-label="Morning">{e.amIn && e.amOut ? `${formatTime12(e.amIn)} – ${formatTime12(e.amOut)}` : "—"}</span>
                   <span data-label="Afternoon">{e.pmIn && e.pmOut ? `${formatTime12(e.pmIn)} – ${formatTime12(e.pmOut)}` : "—"}</span>
                   <span data-label="Evening">{e.evIn && e.evOut ? `${formatTime12(e.evIn)} – ${formatTime12(e.evOut)}` : "—"}</span>
-                  <span className="ledger-hours" data-label="Hours">{formatHours(e.hours)}</span>
+                  <span className="ledger-hours" data-label="Hours">
+                    {formatHours(e.hours)}
+                    {(() => {
+                      const c = completionFor(e);
+                      return c.met ? (
+                        <span className="completion-badge is-met" title="Met the expected hours for this shift coverage">
+                          Complete
+                        </span>
+                      ) : (
+                        <span className="completion-badge is-short" title={`Short ${formatHours(Math.abs(c.delta))} of the expected ${formatHours(c.expected)}`}>
+                          −{formatHours(Math.abs(c.delta))}
+                        </span>
+                      );
+                    })()}
+                  </span>
                   <span className="truncate" data-label="Client">{clientName(e.client)}</span>
                   <span data-label="Type">
                     <span className={`tag tag-${e.category}`}>{categoryLabel(e.category)}</span>
@@ -977,87 +1098,91 @@ export default function LogbookPage() {
                 </div>
               </div>
 
-              <div className="ledger-new-grid">
-                <div className="new-field">
-                  <label>Date</label>
-                  <input
-                    type="date"
-                    value={draft.date}
-                    max={todayStr()}
-                    onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
-                  />
-                </div>
+              <div className="new-field date-field">
+                <label>Date</label>
+                <input
+                  type="date"
+                  value={draft.date}
+                  onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))}
+                />
+              </div>
+
+              <div className="segment-groups">
                 {(draftMode === "full" || draftMode === "am") && (
-                  <>
-                    <div className="new-field">
-                      <label><Sun size={11} /> Morning in</label>
-                      <input
-                        type="time"
-                        value={draft.amIn}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, amIn: e.target.value }))}
-                      />
+                  <div className="segment-group segment-am">
+                    <div className="segment-group-title"><Sun size={13} /> Morning</div>
+                    <div className="segment-group-fields">
+                      <div className="new-field">
+                        <label>Morning in</label>
+                        <input
+                          type="time"
+                          value={draft.amIn}
+                          onChange={(e) => setDraft((d) => ({ ...d, amIn: e.target.value }))}
+                        />
+                      </div>
+                      <div className="new-field">
+                        <label>Lunch out</label>
+                        <input
+                          type="time"
+                          value={draft.amOut}
+                          onChange={(e) => setDraft((d) => ({ ...d, amOut: e.target.value }))}
+                        />
+                      </div>
                     </div>
-                    <div className="new-field">
-                      <label>Lunch out</label>
-                      <input
-                        type="time"
-                        value={draft.amOut}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, amOut: e.target.value }))}
-                      />
-                    </div>
-                  </>
+                  </div>
                 )}
                 {(draftMode === "full" || draftMode === "pm" || draftMode === "pmev") && (
-                  <>
-                    <div className="new-field">
-                      <label><Sunset size={11} /> Lunch in</label>
-                      <input
-                        type="time"
-                        value={draft.pmIn}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, pmIn: e.target.value }))}
-                      />
+                  <div className="segment-group segment-pm">
+                    <div className="segment-group-title"><Sunset size={13} /> Afternoon</div>
+                    <div className="segment-group-fields">
+                      <div className="new-field">
+                        <label>Lunch in</label>
+                        <input
+                          type="time"
+                          value={draft.pmIn}
+                          onChange={(e) => setDraft((d) => ({ ...d, pmIn: e.target.value }))}
+                        />
+                      </div>
+                      <div className="new-field">
+                        <label>Afternoon out</label>
+                        <input
+                          type="time"
+                          value={draft.pmOut}
+                          onChange={(e) => setDraft((d) => ({ ...d, pmOut: e.target.value }))}
+                        />
+                      </div>
                     </div>
-                    <div className="new-field">
-                      <label>Afternoon out</label>
-                      <input
-                        type="time"
-                        value={draft.pmOut}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, pmOut: e.target.value }))}
-                      />
-                      <span className="field-hint">Left early? Set the actual time you clocked out.</span>
-                    </div>
-                  </>
+                    <span className="field-hint">Left early? Set the actual time you clocked out.</span>
+                  </div>
                 )}
                 {(draftMode === "ev" || draftMode === "pmev") && (
-                  <>
-                    <div className="new-field">
-                      <label><Moon size={11} /> Evening in</label>
-                      <input
-                        type="time"
-                        value={draft.evIn}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, evIn: e.target.value }))}
-                      />
+                  <div className="segment-group segment-ev">
+                    <div className="segment-group-title"><Moon size={13} /> Evening</div>
+                    <div className="segment-group-fields">
+                      <div className="new-field">
+                        <label>Evening in</label>
+                        <input
+                          type="time"
+                          value={draft.evIn}
+                          onChange={(e) => setDraft((d) => ({ ...d, evIn: e.target.value }))}
+                        />
+                      </div>
+                      <div className="new-field">
+                        <label>Evening out</label>
+                        <input
+                          type="time"
+                          value={draft.evOut}
+                          onChange={(e) => setDraft((d) => ({ ...d, evOut: e.target.value }))}
+                        />
+                      </div>
                     </div>
-                    <div className="new-field">
-                      <label>Evening out</label>
-                      <input
-                        type="time"
-                        value={draft.evOut}
-                        max={draft.date === todayStr() ? nowClock(new Date(liveNow)) : undefined}
-                        onChange={(e) => setDraft((d) => ({ ...d, evOut: e.target.value }))}
-                      />
-                    </div>
-                  </>
+                  </div>
                 )}
-                <div className="new-field small">
-                  <label>Total</label>
-                  <span className="new-hours">{formatHours(segmentHours(draft))}</span>
-                </div>
+              </div>
+
+              <div className="total-strip">
+                <span className="total-strip-label">Total for this entry</span>
+                <span className="total-strip-value">{formatHours(segmentHours(draft))}</span>
               </div>
               <div className="ledger-new-grid secondary">
                 <div className="new-field grow">
@@ -1114,9 +1239,21 @@ export default function LogbookPage() {
             </div>
 
             <div className="ledger-footer">
-              <button className="export-btn" onClick={exportPDF} disabled={exporting}>
-                <FileDown size={14} /> {exporting ? "Preparing report…" : "Export Detailed PDF Report"}
-              </button>
+              <div className="export-controls">
+                <select
+                  className="export-period-select"
+                  value={exportPeriod}
+                  onChange={(e) => setExportPeriod(e.target.value)}
+                  aria-label="Report period"
+                >
+                  <option value="daily">Daily (every entry)</option>
+                  <option value="weekly">Weekly summary</option>
+                  <option value="monthly">Monthly summary</option>
+                </select>
+                <button className="export-btn" onClick={exportPDF} disabled={exporting}>
+                  <FileDown size={14} /> {exporting ? "Preparing report…" : "Export PDF Report"}
+                </button>
+              </div>
               <span className="save-note">
                 {saveState === "saving"
                   ? "Saving…"
