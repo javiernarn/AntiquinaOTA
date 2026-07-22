@@ -5,7 +5,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../context/NotificationContext";
 import { useLiveClock } from "../../hooks/useLiveClock";
 import { NotificationBell, ToastStack } from "../../components/NotificationCenter";
-import { HelpButton } from "../../components/HelpGuide";
+import { HelpButton, OnboardingGuide } from "../../components/HelpGuide";
 import ProgressRing from "../../components/ProgressRing";
 import ReportsPanel from "./ReportsPanel";
 import Footer from "../../components/Footer";
@@ -40,6 +40,7 @@ const STORAGE_KEY = "logbook-v2";
 const SESSION_KEY = "active-session-v1";
 const MILESTONES_KEY = "milestones-v1";
 const REMINDER_KEY = "shift-reminder-v1";
+const ONBOARDING_KEY = "onboarding-seen-v1";
 
 const CATEGORIES = [
   { id: "regular", label: "Regular" },
@@ -199,6 +200,7 @@ export default function LogbookPage() {
   const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" | "ev" | "pmev" — which segment(s) this manual entry covers
   const [editingId, setEditingId] = useState(null); // id of the entry currently being edited, or null when adding a new one
   const [confirmDialog, setConfirmDialog] = useState(null); // { kind: "entry" | "client", id }
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const [activeSession, setActiveSession] = useState(() => getUserStorage(SESSION_KEY, userId));
   const [sessionClient, setSessionClient] = useState("");
@@ -275,8 +277,21 @@ export default function LogbookPage() {
     } finally {
       setLoaded(true);
     }
+
+    // First time this Google account has ever signed in here (or simply
+    // hasn't completed the walkthrough yet) — show the onboarding guide
+    // automatically. Checked per-account, not just "is this a fresh
+    // browser", so it still shows for a new account even on a browser
+    // that already has another trainee's data in it.
+    const seenOnboarding = getUserStorage(ONBOARDING_KEY, userId);
+    setShowOnboarding(!seenOnboarding);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+
+  function finishOnboarding() {
+    setUserStorage(ONBOARDING_KEY, userId, true);
+    setShowOnboarding(false);
+  }
 
   const persist = useCallback((next) => {
     if (!userId) return;
@@ -1311,6 +1326,7 @@ export default function LogbookPage() {
   return (
     <div className="duty-page">
       <ToastStack />
+      <OnboardingGuide open={showOnboarding} onDone={finishOnboarding} />
       {confirmDialog && (() => {
         const isEntry = confirmDialog.kind === "entry";
         const target = isEntry

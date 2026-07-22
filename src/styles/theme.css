@@ -161,6 +161,74 @@ button, input, select {
   .help-card { max-height: 88vh; }
 }
 
+/* ---------- First-time onboarding walkthrough ---------- */
+/* Same look as the regular help card, but not dismissible by backdrop
+   click (no onClick on the overlay) and with a persistent footer instead
+   of a close (X) button in the header. */
+.onboarding-card {
+  max-width: 620px;
+  max-height: min(86vh, 760px);
+}
+.onboarding-card .help-card-head { justify-content: flex-start; }
+.onboarding-card .help-card-body { padding-bottom: 8px; }
+
+.onboarding-end-marker {
+  margin: 4px 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--teal);
+  text-align: center;
+}
+
+.onboarding-footer {
+  border-top: 1px solid var(--line);
+  padding: 12px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboarding-scroll-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  justify-content: center;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  animation: onboarding-hint-bounce 1.4s ease-in-out infinite;
+}
+@keyframes onboarding-hint-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: 10px;
+}
+.onboarding-skip-btn,
+.onboarding-done-btn {
+  flex: 1;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  transition: opacity 0.15s ease;
+}
+.onboarding-skip-btn { background: var(--card); color: var(--ink-soft); }
+.onboarding-skip-btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-soft); }
+.onboarding-done-btn { background: var(--teal); color: #fff; border-color: var(--teal); }
+.onboarding-done-btn:hover:not(:disabled) { background: #196b4f; }
+.onboarding-skip-btn:disabled,
+.onboarding-done-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ---------- Notification bell + panel ---------- */
 .notif-bell { position: relative; }
 
