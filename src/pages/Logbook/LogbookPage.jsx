@@ -5,6 +5,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../context/NotificationContext";
 import { useLiveClock } from "../../hooks/useLiveClock";
 import { NotificationBell, ToastStack } from "../../components/NotificationCenter";
+import { HelpButton } from "../../components/HelpGuide";
 import ProgressRing from "../../components/ProgressRing";
 import ReportsPanel from "./ReportsPanel";
 import Footer from "../../components/Footer";
@@ -1359,6 +1360,7 @@ export default function LogbookPage() {
           </div>
 
           <div className="topbar-actions">
+            <HelpButton />
             <NotificationBell />
             <div className="user-chip">
               {user?.picture ? (

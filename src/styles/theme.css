@@ -53,7 +53,7 @@ img { max-width: 100%; }
    get forced to 40px and blow out of their small containers. */
 @media (max-width: 640px) {
   input, select { min-height: 40px; }
-  button:not(.client-chip button):not(.del-btn):not(.toast-close):not(.icon-btn):not(.bell-btn) {
+  button:not(.client-chip button):not(.del-btn):not(.toast-close):not(.icon-btn):not(.bell-btn):not(.help-btn) {
     min-height: 40px;
   }
   a.landing-cta { min-height: 40px; }
@@ -61,6 +61,104 @@ img { max-width: 100%; }
 
 button, input, select {
   font-family: inherit;
+}
+
+/* ---------- Help (?) button + guide modal ---------- */
+.help-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.help-btn:hover { color: var(--ink); border-color: var(--brass); }
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(22, 33, 28, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 210;
+}
+
+.help-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  max-width: 640px;
+  width: 100%;
+  max-height: min(80vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.help-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.help-card-head h2 {
+  margin: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 17px;
+}
+
+.help-card-body {
+  overflow-y: auto;
+  padding: 16px 20px 22px;
+}
+.help-intro {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.help-section { margin-bottom: 18px; }
+.help-section:last-child { margin-bottom: 0; }
+.help-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.help-section ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.help-section li { margin-bottom: 6px; }
+.help-section li:last-child { margin-bottom: 0; }
+.help-section ul ul { margin-top: 6px; padding-left: 16px; }
+.help-section strong { color: var(--ink); }
+
+.help-inline-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .help-card { max-height: 88vh; }
 }
 
 /* ---------- Notification bell + panel ---------- */
