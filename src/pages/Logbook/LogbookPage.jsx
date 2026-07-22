@@ -624,16 +624,44 @@ export default function LogbookPage() {
   // Switches which segment(s) of the day the manual-entry form captures.
   // Clears the fields for whichever segment doesn't apply, instead of
   // leaving stale default times sitting in a slot the client doesn't use.
+  // The Morning time-in and Afternoon time-out defaults follow the draft's
+  // selected host client's own schedule (e.g. 7:00 AM–6:00 PM) when one's
+  // picked, falling back to the plain 8:00 AM–5:00 PM day otherwise. Lunch
+  // itself (12:00 PM out, 1:00 PM resume) is always fixed.
   function setShiftMode(mode) {
     setDraftMode(mode);
+    setDraft((d) => {
+      const client = clients.find((c) => c.id === d.client);
+      const norm = client ? normalizeClient(client) : null;
+      const defAmIn = norm ? norm.timeIn : "08:00";
+      const defPmOut = norm ? norm.timeOut : "17:00";
+      return {
+        ...d,
+        amIn: mode === "full" || mode === "am" ? d.amIn || defAmIn : "",
+        amOut: mode === "full" || mode === "am" ? d.amOut || "12:00" : "",
+        pmIn: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmIn || "13:00" : "",
+        pmOut: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmOut || defPmOut : "",
+        evIn: mode === "ev" || mode === "pmev" ? d.evIn || "17:00" : "",
+        evOut: mode === "ev" || mode === "pmev" ? d.evOut || "20:00" : "",
+      };
+    });
+  }
+
+  // Selecting (or changing) the host client re-derives this draft's Morning
+  // time-in and Afternoon time-out from that client's own schedule — the
+  // same 7:00 AM–6:00 PM (or whatever's set on the Host clients form) that
+  // the live Clock in/out flow already follows. Only touches whichever of
+  // those two fields is actually part of the current shift coverage (a
+  // field left blank because that segment isn't covered stays blank); the
+  // lunch break stays fixed at 12:00–1:00 PM either way.
+  function handleClientChange(clientId) {
+    const client = clientId ? clients.find((c) => c.id === clientId) : null;
+    const norm = client ? normalizeClient(client) : null;
     setDraft((d) => ({
       ...d,
-      amIn: mode === "full" || mode === "am" ? d.amIn || "08:00" : "",
-      amOut: mode === "full" || mode === "am" ? d.amOut || "12:00" : "",
-      pmIn: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmIn || "13:00" : "",
-      pmOut: mode === "full" || mode === "pm" || mode === "pmev" ? d.pmOut || "17:00" : "",
-      evIn: mode === "ev" || mode === "pmev" ? d.evIn || "17:00" : "",
-      evOut: mode === "ev" || mode === "pmev" ? d.evOut || "20:00" : "",
+      client: clientId,
+      amIn: d.amIn && norm ? norm.timeIn : d.amIn,
+      pmOut: d.pmOut && norm ? norm.timeOut : d.pmOut,
     }));
   }
 
@@ -1642,7 +1670,7 @@ export default function LogbookPage() {
                   <select
                     className={!draft.client ? "field-required" : ""}
                     value={draft.client}
-                    onChange={(e) => setDraft((d) => ({ ...d, client: e.target.value }))}
+                    onChange={(e) => handleClientChange(e.target.value)}
                   >
                     <option value="">Select a host client…</option>
                     {clients.map((c) => (
