@@ -1,20 +1,43 @@
-.duty-page { min-height: 100vh; padding: 0 18px 60px; }
-.duty-shell { max-width: 940px; margin: 0 auto; }
+/* =========================================================================
+   Duty Log — logbook.css
+   Mobile-first, fully responsive. No horizontal overflow on any phone
+   (tested target range: 320px .. 1440px+). Class names preserved so
+   LogbookPage.jsx / ReportsPanel.jsx do not need changes.
+   ========================================================================= */
 
-/* ---------- Top bar: stays fixed in place while the page scrolls ---------- */
+/* ---------- Global safety rails ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+.duty-page {
+  min-height: 100vh;
+  padding: 0 clamp(10px, 3.5vw, 20px) calc(60px + env(safe-area-inset-bottom));
+  /* Never allow horizontal scroll on the page itself. Any child that tries
+     to overflow (long unbreakable strings, wide native controls) is clipped
+     visually instead of pushing the whole layout right. */
+  overflow-x: hidden;
+}
+.duty-shell {
+  max-width: 940px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Give every text container a chance to shrink inside flex/grid tracks. */
+.duty-shell :where(input, select, textarea, button) { max-width: 100%; }
+
+/* ---------- Top bar ---------- */
 .duty-topbar {
   position: sticky;
   top: 0;
   z-index: 60;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
   background: var(--paper);
-  padding: 16px 0 14px;
-  padding-top: calc(16px + env(safe-area-inset-top)); /* clears the status bar / notch once installed as an app */
-  margin-bottom: 8px;
+  padding: 14px 0 12px;
+  padding-top: calc(14px + env(safe-area-inset-top));
+  margin-bottom: 10px;
   border-bottom: 1px solid transparent;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -23,9 +46,14 @@
   box-shadow: 0 4px 14px rgba(22, 33, 28, 0.06);
 }
 
-.brand { display: flex; align-items: center; gap: 12px; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0; /* allows the title to truncate rather than shove siblings */
+}
 .brand-logo {
-  width: 46px; height: 46px;
+  width: 44px; height: 44px;
   object-fit: contain;
   padding: 5px;
   background: var(--card);
@@ -34,58 +62,66 @@
   box-shadow: var(--shadow);
   flex-shrink: 0;
 }
+.brand-text { min-width: 0; }
 .brand-eyebrow {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 1.4px;
-  color: var(--brass);
-  margin-bottom: 1px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1.4px;
+  color: var(--brass); margin-bottom: 1px;
 }
-.brand-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; line-height: 1.15; }
-.brand-sub { font-size: 11.5px; color: var(--ink-soft); }
+.brand-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700; font-size: clamp(15px, 4.2vw, 18px); line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.brand-sub {
+  font-size: 11.5px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-actions {
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0;
+}
 .user-chip { display: flex; align-items: center; gap: 8px; }
 .avatar {
-  width: 30px; height: 30px;
-  border-radius: 50%;
-  background: var(--brass-soft);
-  color: #5A4114;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--brass-soft); color: #5A4114;
   font-size: 11.5px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
 }
 .avatar-photo { object-fit: cover; border: 1px solid var(--line); }
 .user-name { font-size: 13px; color: var(--ink-soft); }
 .signout-btn {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  color: var(--ink-soft);
-  padding: 8px 13px;
-  border-radius: 10px;
-  font-size: 12.5px;
-  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--card); border: 1px solid var(--line); color: var(--ink-soft);
+  padding: 8px 12px; border-radius: 10px; font-size: 12.5px; cursor: pointer;
+  flex-shrink: 0;
 }
 .signout-btn:hover { color: var(--danger); border-color: var(--rust); }
 
 /* ---------- Hero: ring + live clock ---------- */
 .duty-hero {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 26px;
   align-items: center;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 20px;
-  padding: 26px;
+  padding: clamp(18px, 4vw, 26px);
   box-shadow: var(--shadow);
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
-
-.hero-ring { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-
-.duty-ring { position: relative; width: 224px; height: 224px; }
+.hero-ring {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  min-width: 0;
+}
+.duty-ring {
+  position: relative;
+  width: clamp(180px, 55vw, 224px);
+  height: clamp(180px, 55vw, 224px);
+}
 .ring-track { fill: none; stroke: var(--line); }
 .ring-tick { stroke: var(--line); stroke-width: 2; }
 .ring-tick.major { stroke: var(--ink-soft); stroke-width: 2.4; }
@@ -99,64 +135,57 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center;
 }
-.ring-hours { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600; }
+.ring-hours { font-family: 'IBM Plex Mono', monospace; font-size: clamp(20px, 5.5vw, 24px); font-weight: 600; }
 .ring-target { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
 .ring-percent { font-size: 12.5px; color: var(--brass); font-weight: 600; margin-top: 6px; }
 .duty-ring.is-complete .ring-percent { color: var(--teal); }
 
 .ring-seal {
-  position: absolute;
-  bottom: 6px; left: 50%;
+  position: absolute; bottom: 6px; left: 50%;
   transform: translateX(-50%) rotate(-4deg);
-  background: var(--teal);
-  color: #fff;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  padding: 4px 9px;
-  border-radius: 6px;
+  background: var(--teal); color: #fff;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.6px;
+  padding: 4px 9px; border-radius: 6px;
   animation: seal-pop 0.4s ease;
 }
-@keyframes seal-pop { from { transform: translateX(-50%) rotate(-4deg) scale(0.7); opacity: 0; } to { transform: translateX(-50%) rotate(-4deg) scale(1); opacity: 1; } }
-
-.ring-footnote { display: flex; gap: 8px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; justify-content: center; }
+@keyframes seal-pop {
+  from { transform: translateX(-50%) rotate(-4deg) scale(0.7); opacity: 0; }
+  to   { transform: translateX(-50%) rotate(-4deg) scale(1); opacity: 1; }
+}
+.ring-footnote {
+  display: flex; gap: 8px; font-size: 12px; color: var(--ink-soft);
+  flex-wrap: wrap; justify-content: center;
+}
 .ot-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 
-.hero-clock { display: flex; flex-direction: column; gap: 10px; }
-.clock-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
+.hero-clock { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.clock-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .clock-label.live { color: var(--teal); }
-.live-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
-  animation: pulse 1.4s infinite;
-}
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); animation: pulse 1.4s infinite; flex-shrink: 0; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .clock-digits {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 40px;
-  font-weight: 600;
-  letter-spacing: 1px;
+  font-size: clamp(30px, 8vw, 40px);
+  font-weight: 600; letter-spacing: 1px;
+  word-break: break-all;
 }
 
-.clock-controls { display: flex; gap: 8px; flex-wrap: wrap; }
-.clock-controls select, .clock-controls input {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px 10px;
-  font-size: 13px;
-  background: var(--paper);
-  color: var(--ink);
+.clock-controls {
+  display: flex; gap: 8px; flex-wrap: wrap;
 }
-.clock-controls input[type="text"] { flex: 1; min-width: 160px; }
+.clock-controls select,
+.clock-controls input {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 9px 10px; font-size: 13px;
+  background: var(--paper); color: var(--ink);
+  min-width: 0;
+}
+.clock-controls input[type="text"] { flex: 1 1 160px; min-width: 0; }
 
-/* ---------- Selects: consistent size + custom arrow everywhere ----------
-   Native <select> menus render with the OS/browser's own dropdown list — that
-   part can't be restyled — but the closed control itself was inconsistent in
-   height/padding and used the bulky default arrow. This normalizes it. */
+/* ---------- Native <select> normalization ---------- */
 select {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2356635A' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 10px center;
@@ -166,57 +195,52 @@ select {
 }
 
 .clock-in-btn, .clock-out-btn {
-  display: flex; align-items: center; gap: 6px;
-  border: none;
-  border-radius: 8px;
-  padding: 9px 16px;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; border-radius: 8px;
+  padding: 10px 16px; font-size: 13.5px; font-weight: 600; cursor: pointer;
 }
 .clock-in-btn { background: var(--teal); color: #fff; }
 .clock-in-btn:hover { background: #185f49; }
 .clock-out-btn { background: var(--rust); color: #fff; }
 .clock-out-btn:hover { background: #9c3324; }
-
 .clock-hint { font-size: 11.5px; color: var(--ink-soft); margin: 0; }
 
 /* ---------- Setup row ---------- */
 .duty-setup {
   display: grid;
-  grid-template-columns: 1fr 140px 1.6fr;
+  grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1.6fr);
   gap: 14px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 18px 20px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
+.setup-field { min-width: 0; }
 .setup-field label {
   display: flex; align-items: center; gap: 5px;
   font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px;
   color: var(--ink-soft); margin-bottom: 6px;
 }
 .setup-field input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 14px;
-  background: var(--paper);
+  width: 100%; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 14px; background: var(--paper);
 }
 .setup-field input:focus { outline: none; border-color: var(--brass); }
 
-.client-manager { display: flex; flex-direction: column; gap: 8px; }
+.client-manager { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .client-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
 .chips-empty { font-size: 12px; color: var(--ink-soft); font-style: italic; }
 .client-chip {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--evening-soft);
-  color: var(--evening);
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--evening-soft); color: var(--evening);
   font-size: 12px; font-weight: 500;
-  padding: 4px 6px 4px 10px;
-  border-radius: 999px;
+  padding: 4px 6px 4px 10px; border-radius: 999px;
+  max-width: 100%;
+}
+.client-chip > span:first-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 60vw;
 }
 .client-chip button {
   background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer;
@@ -228,186 +252,176 @@ select {
 .client-chip button:disabled:hover { opacity: 0.35; }
 .client-chip.in-use { padding-right: 8px; }
 .chip-count {
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--evening);
-  font-size: 10px; font-weight: 700;
-  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7); color: var(--evening);
+  font-size: 10px; font-weight: 700; border-radius: 999px;
   min-width: 15px; height: 15px;
   display: flex; align-items: center; justify-content: center;
-  padding: 0 3px;
+  padding: 0 3px; flex-shrink: 0;
 }
 .client-add { display: flex; gap: 6px; }
-.client-add input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--paper); }
+.client-add input {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; background: var(--paper);
+}
 .client-add button {
   background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
-  width: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  width: 34px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .client-add button:hover { background: var(--brass); }
 
 /* ---------- Tabs ---------- */
-.duty-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.duty-tabs {
+  display: flex; gap: 6px; margin-bottom: 12px;
+  overflow-x: auto; /* if labels ever grow, scroll instead of overflowing */
+  scrollbar-width: none;
+}
+.duty-tabs::-webkit-scrollbar { display: none; }
 .duty-tabs button {
   background: none; border: none;
-  padding: 8px 4px;
-  font-size: 13.5px; font-weight: 600;
+  padding: 8px 4px; font-size: 13.5px; font-weight: 600;
   color: var(--ink-soft);
   border-bottom: 2px solid transparent;
-  cursor: pointer;
-  margin-right: 14px;
+  cursor: pointer; margin-right: 14px;
+  white-space: nowrap; flex-shrink: 0;
 }
 .duty-tabs button.active { color: var(--ink); border-bottom-color: var(--brass); }
 
-/* ---------- Ledger ---------- */
+/* ---------- Ledger card ---------- */
 .ledger-card, .reports-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 18px 20px 14px;
-  box-shadow: var(--shadow);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; padding: clamp(14px, 3.5vw, 20px);
+  box-shadow: var(--shadow); min-width: 0;
 }
 
 .ledger-head, .ledger-row {
   display: grid;
-  grid-template-columns: 104px 100px 100px 100px 60px 1fr 84px 1.05fr 56px;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: 104px 100px 100px 100px 60px minmax(0, 1fr) 84px minmax(0, 1.05fr) 56px;
+  gap: 8px; align-items: center;
 }
 .ledger-head {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px;
   color: var(--ink-soft);
-  padding-bottom: 8px;
-  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 8px; border-bottom: 1.5px solid var(--ink);
 }
 .ledger-head span { display: flex; align-items: center; gap: 4px; }
 .ledger-row {
-  font-size: 13px;
-  padding: 10px 0;
+  font-size: 13px; padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
+.ledger-row > span { min-width: 0; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .ledger-hours {
   font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600;
   display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
 }
-.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
-
-/* ---------- Completion badge: did this entry meet the standard hours for
-   its own shift coverage (Whole day / Morning only / etc.)? ---------- */
 .completion-badge {
-  font-family: 'Inter', sans-serif;
-  font-size: 9.5px; font-weight: 700; letter-spacing: 0.2px;
-  padding: 1.5px 6px; border-radius: 999px; white-space: nowrap;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.4px;
+  padding: 2px 6px; border-radius: 999px; text-transform: uppercase;
 }
 .completion-badge.is-met { background: var(--teal-soft); color: var(--teal); }
 .completion-badge.is-short { background: var(--rust-soft); color: var(--rust); }
 
-/* ---------- Export controls: report-period selector + the export button ---------- */
-.export-controls { display: flex; align-items: center; gap: 8px; }
+/* ---------- Export controls ---------- */
+.export-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .export-period-select {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 12.5px;
-  background: var(--card);
-  color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 12.5px;
+  background: var(--card); color: var(--ink);
 }
 .export-period-select:focus { outline: none; border-color: var(--brass); }
 
 .tag {
   font-size: 10.5px; font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  display: inline-block; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.tag-regular { background: var(--brass-soft); color: #5A4114; }
-.tag-evening { background: var(--evening-soft); color: var(--evening); }
+.tag-regular  { background: var(--brass-soft); color: #5A4114; }
+.tag-evening  { background: var(--evening-soft); color: var(--evening); }
 .tag-overtime { background: var(--rust-soft); color: var(--rust); }
 
 .del-btn, .edit-btn {
   background: none; border: none; cursor: pointer; color: var(--ink-soft);
-  padding: 4px; display: flex; align-items: center; justify-content: center;
+  padding: 6px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 6px;
 }
-.del-btn:hover { color: var(--danger); background: var(--rust-soft); }
-.edit-btn:hover { color: var(--teal); background: var(--teal-soft); }
+.del-btn:hover  { color: var(--danger); background: var(--rust-soft); }
+.edit-btn:hover { color: var(--teal);   background: var(--teal-soft); }
 .row-actions { display: flex; align-items: center; gap: 2px; justify-content: flex-end; }
 
 .ledger-row.is-editing {
   background: var(--teal-soft);
-  border-radius: 8px;
-  margin: 0 -8px;
-  padding: 10px 8px;
+  border-radius: 8px; margin: 0 -8px; padding: 10px 8px;
 }
 
 /* ---------- Delete confirmation ---------- */
 .confirm-overlay {
-  position: fixed;
-  inset: 0;
+  position: fixed; inset: 0;
   background: rgba(22, 33, 28, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; z-index: 200;
 }
 .confirm-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 22px 22px 18px;
-  max-width: 340px;
-  width: 100%;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: var(--shadow);
+  padding: 22px 22px 18px; max-width: 340px; width: 100%;
 }
 .confirm-card h3 { margin: 0 0 8px; font-family: 'Space Grotesk', sans-serif; font-size: 16px; }
-.confirm-card p { margin: 0 0 18px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.confirm-card p  { margin: 0 0 18px; font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
 .confirm-actions { display: flex; gap: 10px; }
 .confirm-btn {
-  flex: 1;
-  border-radius: 9px;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
+  flex: 1; border-radius: 9px; padding: 10px 12px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
   border: 1px solid var(--line);
 }
-.confirm-btn--no { background: var(--card); color: var(--ink); }
-.confirm-btn--no:hover { border-color: var(--ink-soft); }
+.confirm-btn--no  { background: var(--card); color: var(--ink); }
+.confirm-btn--no:hover  { border-color: var(--ink-soft); }
 .confirm-btn--yes { background: var(--rust); color: #fff; border-color: var(--rust); }
 .confirm-btn--yes:hover { background: #9c3324; }
 
 .empty-row { font-size: 12.5px; color: var(--ink-soft); padding: 18px 0; font-style: italic; }
 
-/* ---------- Add-a-day form (Morning / Afternoon segments) ---------- */
+/* ---------- Add-a-day form ---------- */
 .ledger-new-wrap {
   background: var(--paper);
   border: 1px dashed var(--line);
   border-radius: 12px;
-  padding: 14px;
+  padding: clamp(12px, 3vw, 16px);
   margin: 14px 0 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: flex; flex-direction: column; gap: 12px;
+  min-width: 0;
 }
 
-/* Shift-coverage toggle: lets you drop the morning or afternoon segment
-   entirely for clients/days that only run half a shift. */
-.shift-mode-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Shift-coverage toggle — auto-fit wraps naturally without cropping labels. */
+.shift-mode-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+}
 .shift-mode-label {
   font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--ink-soft); font-weight: 700;
+  flex-shrink: 0;
 }
-.shift-mode-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+.shift-mode-toggle {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  flex: 1 1 100%;
+}
 .shift-mode-toggle button {
-  display: flex; align-items: center; justify-content: center; gap: 5px;
-  background: var(--card);
-  border: 1px solid var(--line);
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  background: var(--card); border: 1px solid var(--line);
   color: var(--ink-soft);
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 11.5px; font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  min-width: 0;
+  /* Each pill sizes to its own content, so long labels like
+     "Afternoon → Evening" never get cropped inside a rigid grid track. */
+  flex: 0 1 auto;
 }
 .shift-mode-toggle button:hover { border-color: var(--brass); color: var(--ink); }
 .shift-mode-toggle button.active {
@@ -415,12 +429,9 @@ select {
 }
 
 .ledger-new-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: end;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: end;
 }
-.ledger-new-grid.secondary > .new-field { flex: 1 1 160px; }
+.ledger-new-grid.secondary > .new-field      { flex: 1 1 160px; }
 .ledger-new-grid.secondary > .new-field.grow { flex: 2 1 220px; }
 .new-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .new-field.grow { width: 100%; }
@@ -429,78 +440,66 @@ select {
   font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--ink-soft); font-weight: 600;
 }
-.new-field input, .new-field select {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 7px 8px;
-  font-size: 12.5px;
-  width: 100%;
+.new-field input,
+.new-field select {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 7px; padding: 8px 10px;
+  font-size: 12.5px; width: 100%; min-width: 0;
 }
-.new-field input:focus, .new-field select:focus { outline: none; border-color: var(--brass); }
+.new-field input:focus,
+.new-field select:focus { outline: none; border-color: var(--brass); }
 .required-mark { color: var(--danger); }
 .new-field select.field-required { border-color: var(--rust); background: var(--rust-soft); }
 .field-hint {
   display: block;
-  font-size: 10.5px; color: var(--ink-soft); font-style: italic; line-height: 1.3; margin-top: 6px;
+  font-size: 10.5px; color: var(--ink-soft); font-style: italic;
+  line-height: 1.3; margin-top: 6px;
 }
 
-/* ---------- Date field (its own row, never fights another field for space) ---------- */
+/* Date on its own row */
 .date-field { max-width: 220px; margin-bottom: 2px; }
 .date-field input { font-weight: 600; }
 
-/* ---------- Segment groups: Morning / Afternoon / Evening, each a clearly
-   bounded card so its two time inputs never collide with a neighboring
-   segment's fields or with the Total summary. ---------- */
+/* Segment groups — Morning / Afternoon / Evening */
 .segment-groups {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 10px;
 }
 .segment-group {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px 12px 12px;
+  padding: 12px;
   min-width: 0;
 }
 .segment-group-title {
   display: flex; align-items: center; gap: 6px;
   font-size: 11.5px; font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 9px;
+  color: var(--ink); margin-bottom: 9px;
 }
 .segment-am .segment-group-title { color: #8A6A22; }
 .segment-pm .segment-group-title { color: var(--evening); }
 .segment-ev .segment-group-title { color: var(--rust); }
 .segment-group-fields {
   display: grid;
-  grid-template-columns: 1fr; /* stacked by default — safe on every phone width */
+  grid-template-columns: 1fr; /* stack on phones */
   gap: 8px;
 }
 @media (min-width: 480px) {
-  /* Only go side-by-side once there's genuinely enough room — this is
-     wider than every current iPhone/Android portrait width, so phones
-     (including the 414px-wide iPhone XR) always get the full-width,
-     never-crowded stacked layout; tablets and desktop get the compact
-     2-up layout. */
   .segment-group-fields { grid-template-columns: 1fr 1fr; }
 }
 .segment-group-fields .new-field { min-width: 0; }
 .new-field input[type="time"],
 .new-field input[type="date"] {
-  min-width: 0; /* iOS gives native time/date controls a wide intrinsic
-                   size — without this, a grid/flex track can be forced
-                   wider than its column and the field spills into its
-                   neighbor or off the edge of the card. */
+  min-width: 0; /* iOS native controls have huge intrinsic width; clamp it */
+  width: 100%;
 }
 
-/* ---------- Total strip: a distinct full-width summary bar, always on its
-   own row below every segment group so it never overlaps a time input. ---------- */
+/* Total strip */
 .total-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
   background: var(--teal-soft);
   border-radius: 9px;
   padding: 10px 14px;
@@ -510,32 +509,34 @@ select {
   color: var(--teal); font-weight: 700;
 }
 .total-strip-value {
-  font-family: 'IBM Plex Mono', monospace; font-size: 16px; font-weight: 700;
-  color: var(--teal);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 16px; font-weight: 700; color: var(--teal);
 }
 
 .editing-banner {
-  display: flex; align-items: center; gap: 7px;
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
   background: var(--teal-soft); color: var(--teal);
   border-radius: 8px; padding: 8px 12px;
   font-size: 12px; font-weight: 600;
 }
 .ledger-new-wrap.is-editing { border-style: solid; border-color: var(--teal); }
 
-.new-field-actions { display: flex; gap: 8px; align-items: stretch; }
-.new-field-actions .add-btn { flex: 1; }
+.new-field-actions { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; }
+.new-field-actions .add-btn { flex: 1 1 160px; }
 .cancel-edit-btn {
-  display: flex; align-items: center; gap: 5px; justify-content: center;
+  display: inline-flex; align-items: center; gap: 5px; justify-content: center;
   background: var(--card); border: 1.4px solid var(--line); color: var(--ink-soft);
-  padding: 9px 14px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  padding: 10px 14px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
   white-space: nowrap;
 }
 .cancel-edit-btn:hover { border-color: var(--rust); color: var(--rust); }
 .add-btn {
   background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
-  padding: 9px 16px;
-  display: flex; align-items: center; gap: 6px; justify-content: center; cursor: pointer;
-  font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  padding: 11px 18px;
+  display: inline-flex; align-items: center; gap: 6px; justify-content: center;
+  cursor: pointer;
+  font-size: 13px; font-weight: 600; white-space: nowrap;
 }
 .add-btn:hover { background: var(--teal); }
 
@@ -545,29 +546,36 @@ select {
   flex-wrap: wrap; gap: 10px;
 }
 .export-btn {
-  display: flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px;
   background: none; border: 1.4px solid var(--ink); color: var(--ink);
-  padding: 8px 14px; border-radius: 8px; font-size: 12.5px; cursor: pointer;
+  padding: 9px 14px; border-radius: 8px;
+  font-size: 12.5px; cursor: pointer;
 }
-.export-btn:hover { background: var(--ink); color: var(--paper); }
-.export-btn:disabled { opacity: 0.6; cursor: wait; }
-.export-btn:disabled:hover { background: none; color: var(--ink); }
+.export-btn:hover           { background: var(--ink); color: var(--paper); }
+.export-btn:disabled        { opacity: 0.6; cursor: wait; }
+.export-btn:disabled:hover  { background: none; color: var(--ink); }
 .save-note { font-size: 11px; color: var(--ink-soft); }
 
 /* ---------- Reports ---------- */
-.reports-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.reports-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 18px;
+}
 .report-card h3 { font-family: 'Space Grotesk', sans-serif; font-size: 15px; margin: 0 0 14px; }
 .bar-list { display: flex; flex-direction: column; gap: 14px; }
-.bar-row-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
-.bar-name { display: flex; align-items: center; gap: 6px; font-weight: 500; }
-.bar-value { font-family: 'IBM Plex Mono', monospace; color: var(--ink-soft); }
+.bar-row-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; margin-bottom: 5px; }
+.bar-name  { display: flex; align-items: center; gap: 6px; font-weight: 500; min-width: 0; }
+.bar-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-value { font-family: 'IBM Plex Mono', monospace; color: var(--ink-soft); flex-shrink: 0; }
 .bar-track { height: 8px; background: var(--paper); border-radius: 999px; overflow: hidden; }
-.bar-fill { height: 100%; background: var(--brass); border-radius: 999px; transition: width 0.5s ease; }
+.bar-fill  { height: 100%; background: var(--brass); border-radius: 999px; transition: width 0.5s ease; }
 .bar-fill.client { background: var(--evening); }
 .bar-meta { font-size: 10.5px; color: var(--ink-soft); margin-top: 3px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
 .report-total {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line);
   font-size: 13px;
 }
@@ -576,17 +584,17 @@ select {
 .report-card--wide { grid-column: 1 / -1; }
 .report-card-sub { font-size: 11.5px; color: var(--ink-soft); margin: -8px 0 14px; }
 
-/* ---------- Shift coverage completion card ---------- */
+/* Shift-coverage completion card */
 .completion-summary { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .completion-stat {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 11px; border-radius: 10px;
 }
-.completion-stat > div { display: flex; flex-direction: column; gap: 1px; }
+.completion-stat > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .completion-stat strong { font-family: 'IBM Plex Mono', monospace; font-size: 15px; line-height: 1.2; }
-.completion-stat span { font-size: 11.5px; color: var(--ink-soft); }
-.completion-stat--met { background: var(--teal-soft); color: var(--teal); }
-.completion-stat--met strong { color: var(--teal); }
+.completion-stat span   { font-size: 11.5px; color: var(--ink-soft); }
+.completion-stat--met   { background: var(--teal-soft); color: var(--teal); }
+.completion-stat--met strong   { color: var(--teal); }
 .completion-stat--short { background: var(--rust-soft); color: var(--rust); }
 .completion-stat--short strong { color: var(--rust); }
 .completion-breakdown { padding-top: 4px; border-top: 1px solid var(--line); }
@@ -602,89 +610,86 @@ select {
   border-left: 3px solid var(--brass);
   border-radius: 10px;
   padding: 12px 14px;
+  min-width: 0;
 }
-.timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .timeline-date { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
 .timeline-segs { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
-.timeline-seg { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); }
+.timeline-seg  { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); }
 .timeline-seg em { color: var(--ink-soft); font-style: normal; }
-.timeline-meta { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--ink-soft); flex-wrap: wrap; gap: 6px; }
-.timeline-client { display: flex; align-items: center; gap: 4px; }
-.timeline-total { font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600; }
-.timeline-task { margin-top: 8px; font-size: 12px; color: var(--ink-soft); font-style: italic; border-top: 1px dashed var(--line); padding-top: 8px; }
+.timeline-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11.5px; color: var(--ink-soft);
+  flex-wrap: wrap; gap: 6px;
+}
+.timeline-client { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.timeline-total  { font-family: 'IBM Plex Mono', monospace; color: var(--brass); font-weight: 600; }
+.timeline-task {
+  margin-top: 8px; font-size: 12px; color: var(--ink-soft);
+  font-style: italic; border-top: 1px dashed var(--line); padding-top: 8px;
+  word-wrap: break-word; overflow-wrap: anywhere;
+}
 
-/* ---------- Responsive: tablets and small laptops ---------- */
+/* =========================================================================
+   BREAKPOINTS
+   ========================================================================= */
+
+/* Tablets / small laptops */
 @media (max-width: 900px) {
-  .duty-page { padding: 0 14px 50px; }
   .ledger-head, .ledger-row {
-    grid-template-columns: 84px 84px 84px 84px 50px 1fr 68px 1fr 48px;
+    grid-template-columns: 84px 84px 84px 84px 50px minmax(0, 1fr) 68px minmax(0, 1fr) 48px;
     font-size: 11.5px;
   }
 }
 
-/* ---------- Responsive: phones (landscape phablets down to hero stacking) ---------- */
+/* Large phones / phablets — hero stacks, setup single column */
 @media (max-width: 720px) {
-  .duty-hero { grid-template-columns: 1fr; text-align: center; padding: 20px; }
+  .duty-hero  { grid-template-columns: 1fr; text-align: center; }
   .hero-clock { align-items: center; }
   .clock-controls { justify-content: center; }
   .duty-setup { grid-template-columns: 1fr; padding: 16px; }
-  .reports-grid { grid-template-columns: 1fr; }
   .ledger-new-grid.secondary > .new-field { flex-basis: 100%; }
   .new-field-actions { flex-direction: column; width: 100%; }
-  .add-btn { width: 100%; padding: 11px 16px; }
-  .cancel-edit-btn { width: 100%; }
+  .add-btn, .cancel-edit-btn { width: 100%; }
 
-  /* Shift coverage: equal-width 3-up row instead of free-wrapping pills, so
-     it always lines up cleanly regardless of label length. */
-  .shift-mode-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .shift-mode-toggle {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    width: 100%;
-  }
-  .shift-mode-toggle button { padding: 8px 4px; font-size: 11px; }
-
-  /* iOS Safari auto-zooms into any input/select under 16px on focus — this
-     keeps every field at 16px on phones so tapping in doesn't jump-zoom. */
+  /* iOS Safari auto-zooms into any input/select < 16px on focus. */
   .clock-controls select,
   .clock-controls input,
   .setup-field input,
   .client-add input,
   .new-field input,
-  .new-field select {
+  .new-field select,
+  .export-period-select {
     font-size: 16px;
   }
 }
 
-/* ---------- Responsive: all mobile phones — ledger becomes a card list ---------- */
+/* All phones — ledger becomes a card list */
 @media (max-width: 640px) {
-  .duty-page {
-    padding: 0 10px calc(50px + env(safe-area-inset-bottom));
+  .duty-topbar {
+    padding: 12px 0 10px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+    margin-bottom: 10px;
   }
-  .duty-topbar { padding: 12px 0 10px; padding-top: calc(12px + env(safe-area-inset-top)); margin-bottom: 12px; }
-  .brand-title { font-size: 16px; }
   .brand-logo { width: 40px; height: 40px; }
-  .user-name { display: none; } /* keep the topbar compact on narrow phones */
+  .user-name { display: none; }
   .signout-btn span { display: none; }
-
-  .clock-digits { font-size: 32px; }
-  .ring-hours { font-size: 20px; }
+  .signout-btn { padding: 8px 10px; }
 
   .ledger-card, .reports-card { padding: 14px; border-radius: 14px; }
 
-  .ledger-head { display: none; } /* header row is redundant once rows become labeled cards */
+  .ledger-head { display: none; }
 
   .ledger-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "date date"
+      "date    date"
       "morning afternoon"
       "evening hours"
-      "client client"
-      "type type"
-      "notes notes";
+      "client  client"
+      "type    type"
+      "notes   notes";
     gap: 6px 10px;
     background: var(--paper);
     border: 1px solid var(--line);
@@ -694,27 +699,30 @@ select {
     position: relative;
   }
   .ledger-row.is-editing { margin: 0 0 10px; }
-  .ledger-row > span { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+  .ledger-row > span {
+    display: flex; flex-direction: column; gap: 2px;
+    font-size: 12.5px; min-width: 0;
+    overflow-wrap: anywhere; word-break: break-word;
+  }
   .ledger-row > span[data-label]::before {
     content: attr(data-label);
     font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
     color: var(--ink-soft); font-weight: 700;
   }
-  .ledger-row > span[data-label="Date"] { grid-area: date; }
-  .ledger-row > span[data-label="Morning"] { grid-area: morning; }
+  .ledger-row > span[data-label="Date"]      { grid-area: date; }
+  .ledger-row > span[data-label="Morning"]   { grid-area: morning; }
   .ledger-row > span[data-label="Afternoon"] { grid-area: afternoon; }
-  .ledger-row > span[data-label="Evening"] { grid-area: evening; }
-  .ledger-row > span[data-label="Hours"] { grid-area: hours; }
-  .ledger-row > span[data-label="Client"] { grid-area: client; }
-  .ledger-row > span[data-label="Type"] { grid-area: type; }
-  .ledger-row > span[data-label="Notes"] { grid-area: notes; }
+  .ledger-row > span[data-label="Evening"]   { grid-area: evening; }
+  .ledger-row > span[data-label="Hours"]     { grid-area: hours; }
+  .ledger-row > span[data-label="Client"]    { grid-area: client; }
+  .ledger-row > span[data-label="Type"]      { grid-area: type; }
+  .ledger-row > span[data-label="Notes"]     { grid-area: notes; }
   .ledger-row .truncate { white-space: normal; }
-  .ledger-row .row-actions { position: absolute; top: 10px; right: 10px; }
+  .ledger-row .row-actions { position: absolute; top: 8px; right: 8px; }
 
   .ledger-footer { flex-direction: column; align-items: stretch; }
   .export-controls { flex-direction: column; width: 100%; }
-  .export-period-select { width: 100%; }
-  .export-btn { justify-content: center; width: 100%; }
+  .export-period-select, .export-btn { width: 100%; justify-content: center; }
 
   .segment-groups { grid-template-columns: 1fr; }
   .completion-badge { align-self: flex-start; }
@@ -723,9 +731,22 @@ select {
   .timeline-meta { flex-direction: column; align-items: flex-start; }
 }
 
-/* ---------- Responsive: smallest phones (older/compact devices) ---------- */
+/* Smallest / compact phones (iPhone SE 1st gen, older Androids ~320-360px) */
 @media (max-width: 380px) {
-  .duty-setup, .duty-hero { padding: 14px; }
+  .duty-page { padding-left: 8px; padding-right: 8px; }
+  .duty-setup, .duty-hero, .ledger-card, .reports-card { padding: 12px; }
   .ring-footnote { font-size: 11px; }
-  .shift-mode-toggle button { font-size: 10.2px; padding: 8px 2px; gap: 3px; }
+  .shift-mode-toggle button {
+    font-size: 11px; padding: 7px 10px; gap: 4px;
+  }
+  .clock-in-btn, .clock-out-btn { padding: 10px 12px; font-size: 13px; }
+  .add-btn { padding: 11px 14px; }
+}
+
+/* Very narrow — 320px iPhone SE / small Androids */
+@media (max-width: 340px) {
+  .brand-title { font-size: 14px; }
+  .brand-sub   { font-size: 10.5px; }
+  .brand-logo  { width: 36px; height: 36px; }
+  .clock-digits { font-size: 28px; }
 }
