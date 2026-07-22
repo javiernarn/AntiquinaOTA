@@ -475,10 +475,25 @@ select {
 .segment-ev .segment-group-title { color: var(--rust); }
 .segment-group-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr; /* stacked by default — safe on every phone width */
   gap: 8px;
 }
+@media (min-width: 480px) {
+  /* Only go side-by-side once there's genuinely enough room — this is
+     wider than every current iPhone/Android portrait width, so phones
+     (including the 414px-wide iPhone XR) always get the full-width,
+     never-crowded stacked layout; tablets and desktop get the compact
+     2-up layout. */
+  .segment-group-fields { grid-template-columns: 1fr 1fr; }
+}
 .segment-group-fields .new-field { min-width: 0; }
+.new-field input[type="time"],
+.new-field input[type="date"] {
+  min-width: 0; /* iOS gives native time/date controls a wide intrinsic
+                   size — without this, a grid/flex track can be forced
+                   wider than its column and the field spills into its
+                   neighbor or off the edge of the card. */
+}
 
 /* ---------- Total strip: a distinct full-width summary bar, always on its
    own row below every segment group so it never overlaps a time input. ---------- */
@@ -713,5 +728,4 @@ select {
   .duty-setup, .duty-hero { padding: 14px; }
   .ring-footnote { font-size: 11px; }
   .shift-mode-toggle button { font-size: 10.2px; padding: 8px 2px; gap: 3px; }
-  .segment-group-fields { grid-template-columns: 1fr; }
 }
