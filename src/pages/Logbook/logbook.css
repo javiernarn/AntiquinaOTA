@@ -56,7 +56,9 @@
   display: flex; align-items: center; justify-content: center;
 }
 .avatar-photo { object-fit: cover; border: 1px solid var(--line); }
+.user-id { display: flex; flex-direction: column; line-height: 1.25; }
 .user-name { font-size: 13px; color: var(--ink-soft); }
+.user-email { font-size: 11px; color: var(--ink-soft); opacity: 0.7; }
 .signout-btn {
   display: flex; align-items: center; gap: 6px;
   background: var(--card);
@@ -125,10 +127,12 @@
 .hero-clock { display: flex; flex-direction: column; gap: 10px; }
 .clock-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
 .clock-label.live { color: var(--teal); }
+.clock-label.lunch { color: var(--brass); }
 .live-dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
   animation: pulse 1.4s infinite;
 }
+.live-dot.lunch-dot { background: var(--brass); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .clock-digits {
@@ -136,6 +140,13 @@
   font-size: 40px;
   font-weight: 600;
   letter-spacing: 1px;
+}
+.clock-digits--lunch {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--brass);
+  letter-spacing: 0;
 }
 
 .clock-controls { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -207,7 +218,7 @@ select {
 }
 .setup-field input:focus { outline: none; border-color: var(--brass); }
 
-.client-manager { display: flex; flex-direction: column; gap: 8px; }
+.client-manager { display: flex; flex-direction: column; gap: 10px; }
 .client-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
 .chips-empty { font-size: 12px; color: var(--ink-soft); font-style: italic; }
 .client-chip {
@@ -215,9 +226,13 @@ select {
   background: var(--evening-soft);
   color: var(--evening);
   font-size: 12px; font-weight: 500;
-  padding: 4px 6px 4px 10px;
-  border-radius: 999px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
 }
+.client-chip.editing { outline: 2px solid var(--brass); outline-offset: 1px; }
+.chip-main { display: flex; flex-direction: column; gap: 1px; padding: 1px 0; }
+.chip-name { font-weight: 600; }
+.chip-schedule { font-size: 10px; font-weight: 500; opacity: 0.75; }
 .client-chip button {
   background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -235,14 +250,51 @@ select {
   min-width: 15px; height: 15px;
   display: flex; align-items: center; justify-content: center;
   padding: 0 3px;
+  flex-shrink: 0;
 }
-.client-add { display: flex; gap: 6px; }
-.client-add input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; background: var(--paper); }
-.client-add button {
+
+.client-form {
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--paper);
+}
+.client-form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.client-name-input {
+  flex: 1; min-width: 160px;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 13px; background: var(--card);
+}
+.client-type-toggle, .client-days-toggle {
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+.client-type-toggle button, .client-days-toggle button {
+  border: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+  font-size: 11.5px; font-weight: 600; padding: 6px 10px; border-radius: 999px;
+  cursor: pointer;
+}
+.client-days-toggle button { padding: 6px 8px; }
+.client-type-toggle button.active, .client-days-toggle button.active {
+  background: var(--evening); color: var(--paper); border-color: var(--evening);
+}
+.client-time-fields { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+.client-time-fields input {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; font-size: 13px; background: var(--card);
+}
+.client-form-hint { font-size: 11px; color: var(--ink-soft); margin: 0; }
+.client-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.client-save-btn {
+  display: flex; align-items: center; gap: 4px;
   background: var(--ink); color: var(--paper); border: none; border-radius: 8px;
-  width: 34px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
 }
-.client-add button:hover { background: var(--brass); }
+.client-save-btn:hover { background: var(--brass); }
+.client-cancel-btn {
+  background: var(--card); color: var(--ink-soft); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
 
 /* ---------- Tabs ---------- */
 .duty-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
@@ -681,7 +733,8 @@ select {
   .clock-controls select,
   .clock-controls input,
   .setup-field input,
-  .client-add input,
+  .client-name-input,
+  .client-time-fields input,
   .new-field input,
   .new-field select {
     font-size: 16px;
@@ -696,7 +749,7 @@ select {
   .duty-topbar { padding: 12px 0 10px; padding-top: calc(12px + env(safe-area-inset-top)); margin-bottom: 12px; }
   .brand-title { font-size: 16px; }
   .brand-logo { width: 40px; height: 40px; }
-  .user-name { display: none; } /* keep the topbar compact on narrow phones */
+  .user-id { display: none; } /* keep the topbar compact on narrow phones */
   .signout-btn span { display: none; }
 
   .clock-digits { font-size: 32px; }

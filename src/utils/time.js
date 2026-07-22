@@ -1,3 +1,35 @@
+// Every clock reading in this app is anchored to Philippine time (UTC+8),
+// not the device's own timezone/locale. OJT students open this on phones
+// and browsers set to all sorts of locales/24h-clock defaults — anchoring
+// to Asia/Manila is what makes "12:00 PM" and "today" mean the same thing
+// for every trainee, and it's what the auto lunch-break / shift-boundary
+// logic below is timed against.
+const PH_TIME_ZONE = "Asia/Manila";
+
+function phParts(d = new Date()) {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: PH_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(d).map((p) => [p.type, p.value]));
+  let hour = parseInt(parts.hour, 10);
+  if (hour === 24) hour = 0; // some engines report midnight as "24" with hour12:false
+  return {
+    year: parseInt(parts.year, 10),
+    month: parseInt(parts.month, 10),
+    day: parseInt(parts.day, 10),
+    hour,
+    minute: parseInt(parts.minute, 10),
+    second: parseInt(parts.second, 10),
+  };
+}
+
 export function toMinutes(t) {
   if (!t) return null;
   const [h, m] = t.split(":").map(Number);
@@ -21,21 +53,40 @@ export function formatHours(h) {
   return `${sign}${whole}h ${mins.toString().padStart(2, "0")}m`;
 }
 
-// Returns today's date as YYYY-MM-DD using LOCAL time, not UTC.
-// (toISOString() converts to UTC first, which rolls the date back a day
-// for any timezone ahead of UTC — e.g. Philippines, UTC+8 — during the
-// early hours of the day. That was the "date shows 21 instead of 22" bug.)
+// Returns today's date as YYYY-MM-DD in Philippine time — deliberately NOT
+// the device's own timezone. (toISOString() converts to UTC first, which
+// rolls the date back a day for any timezone ahead of UTC — e.g. the
+// Philippines, UTC+8 — during the early hours of the day. That was the
+// "date shows 21 instead of 22" bug.) Anchoring to Asia/Manila instead of
+// device-local time also means a trainee whose phone clock/timezone is
+// wrong still gets the correct Philippine date.
 export function todayStr(d = new Date()) {
-  const y = d.getFullYear();
-  const m = (d.getMonth() + 1).toString().padStart(2, "0");
-  const day = d.getDate().toString().padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  const p = phParts(d);
+  const m = p.month.toString().padStart(2, "0");
+  const day = p.day.toString().padStart(2, "0");
+  return `${p.year}-${m}-${day}`;
 }
 
+// Current wall-clock time in the Philippines as "HH:MM" (24h internally —
+// only used for comparisons/storage; always render with formatTime12 for
+// what the user sees).
 export function nowClock(d = new Date()) {
-  const h = d.getHours().toString().padStart(2, "0");
-  const m = d.getMinutes().toString().padStart(2, "0");
+  const p = phParts(d);
+  const h = p.hour.toString().padStart(2, "0");
+  const m = p.minute.toString().padStart(2, "0");
   return `${h}:${m}`;
+}
+
+// "Wed, Jul 22, 2026 at 3:45 PM (Philippine Time)" — used anywhere a
+// generated/printed timestamp needs to be unambiguous and in the 12-hour
+// format Filipino users actually read, regardless of the device's own
+// locale or timezone settings (which otherwise can render 24-hour time).
+export function formatDateTimePH(d = new Date()) {
+  const p = phParts(d);
+  const dateStr = `${p.year}-${p.month.toString().padStart(2, "0")}-${p.day.toString().padStart(2, "0")}`;
+  const dateLabel = formatDateLong(dateStr);
+  const timeLabel = formatTime12(`${p.hour.toString().padStart(2, "0")}:${p.minute.toString().padStart(2, "0")}`);
+  return `${dateLabel} at ${timeLabel} (Philippine Time)`;
 }
 
 // Human-friendly local date, e.g. "Wed, Jul 22, 2026" — used on the PDF report.
@@ -75,6 +126,17 @@ export function formatTime12(t) {
   h = h % 12;
   if (h === 0) h = 12;
   return `${h}:${m.toString().padStart(2, "0")} ${period}`;
+}
+
+// ISO weekday (Mon=1 … Sun=7) for a YYYY-MM-DD date string. Since the date
+// string itself is already anchored to Philippine time (via todayStr), this
+// just needs the calendar weekday of that y/m/d — which is the same
+// regardless of what timezone the calculation runs in.
+export function weekdayOf(dateStr) {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const day = new Date(y, m - 1, d).getDay(); // 0=Sun … 6=Sat
+  return day === 0 ? 7 : day;
 }
 
 export function uid() {

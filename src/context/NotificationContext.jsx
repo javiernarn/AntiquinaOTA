@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getStorage, setStorage } from "../utils/storage";
+import { getUserStorage, setUserStorage } from "../utils/storage";
+import { useAuth } from "../hooks/useAuth";
 import {
   fireSystemNotification,
   getPermission,
@@ -14,13 +15,25 @@ const TOAST_LIFETIME_MS = 6000;
 const NotificationContext = createContext(null);
 
 export function NotificationProvider({ children }) {
+  const { user } = useAuth();
+  // Same account-scoping as the logbook data — otherwise Trainee B signing
+  // in would see Trainee A's notification history (and vice versa).
+  const userId = user?.sub || user?.email || null;
+
   const [toasts, setToasts] = useState([]);
-  const [history, setHistory] = useState(() => getStorage(HISTORY_KEY) || []);
+  const [history, setHistory] = useState([]);
   const [permission, setPermission] = useState(() => getPermission());
 
+  // Load (and reload, if a different account signs in) this account's
+  // notification history.
   useEffect(() => {
-    setStorage(HISTORY_KEY, history.slice(0, MAX_HISTORY));
-  }, [history]);
+    setHistory(userId ? getUserStorage(HISTORY_KEY, userId) || [] : []);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    setUserStorage(HISTORY_KEY, userId, history.slice(0, MAX_HISTORY));
+  }, [history, userId]);
 
   const dismissToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));

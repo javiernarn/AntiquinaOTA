@@ -8,7 +8,7 @@ import { NotificationBell, ToastStack } from "../../components/NotificationCente
 import ProgressRing from "../../components/ProgressRing";
 import ReportsPanel from "./ReportsPanel";
 import Footer from "../../components/Footer";
-import { getStorage, setStorage, removeStorage, isStorageAvailable } from "../../utils/storage";
+import { getUserStorage, setUserStorage, removeUserStorage, isStorageAvailable } from "../../utils/storage";
 import logo from "../../assets/images/site-logo.png";
 import { LOGO_BASE64 } from "../../assets/logoBase64";
 import {
@@ -28,13 +28,16 @@ import {
   formatWeekRange,
   monthKey,
   formatMonthLabel,
+  formatDateTimePH,
 } from "../../utils/time";
 import { completionFor } from "../../utils/dutyStatus";
+import { COMPANY_TYPES, WEEKDAYS, normalizeClient, isWorkDay, dailyHoursFor, scheduleDaysLabel, defaultsForType } from "../../utils/schedule";
 import "./logbook.css";
 
 const STORAGE_KEY = "logbook-v2";
 const SESSION_KEY = "active-session-v1";
 const MILESTONES_KEY = "milestones-v1";
+const REMINDER_KEY = "shift-reminder-v1";
 
 const CATEGORIES = [
   { id: "regular", label: "Regular" },
@@ -57,13 +60,38 @@ const COVERAGE_META = {
   pmev: { label: "Afternoon → Evening", short: "Afternoon–Evening", icon: Moon },
 };
 
-function coverageOptionsFor(category) {
-  if (category === "evening") return ["ev", "pmev"];
-  if (category === "overtime") return ["full", "am", "pm", "ev", "pmev"];
-  return ["full", "am", "pm"];
+// `restrictMorning` drops "full" and "am" from the list — used when the
+// entry being composed is for TODAY and it's already past 12:00 PM
+// Philippine time, so a fresh Morning (or a "whole day" that starts with
+// one) no longer makes sense to pick. Afternoon/Evening stay available
+// regardless of what time it currently is — picking Afternoon while it's
+// still morning is a normal way to plan ahead for later in the same day.
+function coverageOptionsFor(category, restrictMorning) {
+  let opts;
+  if (category === "evening") opts = ["ev", "pmev"];
+  else if (category === "overtime") opts = ["full", "am", "pm", "ev", "pmev"];
+  else opts = ["full", "am", "pm"];
+  return restrictMorning ? opts.filter((k) => k !== "full" && k !== "am") : opts;
 }
 
 const EVENING_STARTS_AT = 17 * 60; // 5:00 PM, in minutes — when "it's already evening"
+
+// Standard OJT shift boundaries, in minutes-since-midnight, Philippine time.
+// These drive the automatic clock-in flow: lunch out at 12:00 PM (not
+// counted), auto-resume at 1:00 PM, and an automatic clock-out once a
+// session reaches the standard end of its segment (5:00 PM for a Morning/
+// Afternoon shift, 8:00 PM for an Evening shift).
+const LUNCH_OUT_AT = 12 * 60; // 12:00 PM
+const LUNCH_RESUME_AT = 13 * 60; // 1:00 PM
+const PM_END_AT = 17 * 60; // 5:00 PM
+const EV_END_AT = 20 * 60; // 8:00 PM
+
+// How many minutes before 1:00 PM the "lunch is almost over" heads-up fires
+// — a courtesy nudge so a trainee mid-break knows their Afternoon shift is
+// about to resume, on top of the resume notice that fires exactly at 1:00 PM.
+const LUNCH_REMINDER_BEFORE_MIN = 10;
+
+const SEGMENT_LABEL = { am: "Morning", pm: "Afternoon", ev: "Evening" };
 
 function initialsOf(name) {
   if (!name) return "OJ";
@@ -115,29 +143,46 @@ export default function LogbookPage() {
   const { notify } = useNotifications();
   const liveNow = useLiveClock(1000);
 
+  // Stable per-account id — every piece of duty-log data below is scoped to
+  // this, so two different Google accounts signed in on the same browser
+  // never see or overwrite each other's hours. `sub` is Google's permanent
+  // account id; email is only a fallback for older sessions that predate it
+  // being stored.
+  const userId = user?.sub || user?.email || null;
+
   const [loaded, setLoaded] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [studentName, setStudentName] = useState("");
   const [targetHours, setTargetHours] = useState(486);
   const [clients, setClients] = useState([]);
+  const [lastClientId, setLastClientId] = useState(null); // most recently clocked-in client — drives the shift-start reminder
   const [entries, setEntries] = useState([]);
   const [draft, setDraft] = useState(emptyDraft());
   const [tab, setTab] = useState("log");
   const [saveState, setSaveState] = useState("idle");
   const [newClientName, setNewClientName] = useState("");
+  const [newClientType, setNewClientType] = useState("public"); // "public" | "private" | "custom"
+  const [newClientDays, setNewClientDays] = useState(defaultsForType("public").days);
+  const [newClientTimeIn, setNewClientTimeIn] = useState(defaultsForType("public").timeIn);
+  const [newClientTimeOut, setNewClientTimeOut] = useState(defaultsForType("public").timeOut);
+  const [editingClientId, setEditingClientId] = useState(null); // id of the client being edited, or null when adding a new one
   const [exporting, setExporting] = useState(false);
   const [exportPeriod, setExportPeriod] = useState("daily"); // "daily" | "weekly" | "monthly" — grouping used by the PDF export
   const [draftMode, setDraftMode] = useState("full"); // "full" | "am" | "pm" | "ev" | "pmev" — which segment(s) this manual entry covers
   const [editingId, setEditingId] = useState(null); // id of the entry currently being edited, or null when adding a new one
   const [confirmDialog, setConfirmDialog] = useState(null); // { kind: "entry" | "client", id }
 
-  const [activeSession, setActiveSession] = useState(() => getStorage(SESSION_KEY));
+  const [activeSession, setActiveSession] = useState(() => getUserStorage(SESSION_KEY, userId));
   const [sessionClient, setSessionClient] = useState("");
   const [sessionCategory, setSessionCategory] = useState("regular");
   const [sessionNote, setSessionNote] = useState("");
 
-  const milestonesRef = useRef(new Set(getStorage(MILESTONES_KEY) || []));
+  const milestonesRef = useRef(new Set(getUserStorage(MILESTONES_KEY, userId) || []));
   const longShiftRef = useRef(new Set());
+  // Date string (YYYY-MM-DD) the pre-shift reminder already fired for —
+  // prevents it repeating every tick throughout the 10-minute window, and
+  // resets naturally the next calendar day.
+  const shiftReminderFiredRef = useRef(getUserStorage(REMINDER_KEY, userId));
 
   useEffect(() => {
     document.title = "Duty Log | OJT — " + (user?.school || "Opol Community College");
@@ -169,17 +214,29 @@ export default function LogbookPage() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Load persisted logbook state once on mount.
+  // Load persisted logbook state — scoped to the signed-in account, and
+  // re-run whenever the account changes (e.g. signing out of one Google
+  // account and into another) so the new account never inherits data left
+  // in state from the previous one.
   useEffect(() => {
+    if (!userId) return;
+    setLoaded(false);
     try {
-      const raw = getStorage(STORAGE_KEY);
+      const raw = getUserStorage(STORAGE_KEY, userId);
       if (raw) {
         setStudentName(raw.studentName || user?.name || "");
         setTargetHours(typeof raw.targetHours === "number" ? raw.targetHours : 486);
         setClients(Array.isArray(raw.clients) ? raw.clients : []);
         setEntries(Array.isArray(raw.entries) ? raw.entries : []);
-      } else if (user?.name) {
-        setStudentName(user.name);
+        setLastClientId(raw.lastClientId || null);
+      } else {
+        // Fresh account on this browser — reset everything rather than
+        // keeping whatever the previously signed-in account had loaded.
+        setStudentName(user?.name || "");
+        setTargetHours(486);
+        setClients([]);
+        setEntries([]);
+        setLastClientId(null);
       }
     } catch (e) {
       // start fresh
@@ -187,24 +244,25 @@ export default function LogbookPage() {
       setLoaded(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [userId]);
 
   const persist = useCallback((next) => {
+    if (!userId) return;
     setSaveState("saving");
-    const ok = setStorage(STORAGE_KEY, next);
+    const ok = setUserStorage(STORAGE_KEY, userId, next);
     setSaveState(ok ? "saved" : "error");
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(() => {
-      persist({ studentName, targetHours, clients, entries });
+      persist({ studentName, targetHours, clients, entries, lastClientId });
     }, 400);
     return () => clearTimeout(t);
-  }, [loaded, studentName, targetHours, clients, entries, persist]);
+  }, [loaded, studentName, targetHours, clients, entries, lastClientId, persist]);
 
   const loggedHours = useMemo(() => entries.reduce((sum, e) => sum + e.hours, 0), [entries]);
-  const liveElapsedMs = activeSession ? elapsedMsSince(activeSession.startedAt) : 0;
+  const liveElapsedMs = activeSession ? elapsedMsSince(activeSession.segStartedAt) : 0;
   const liveElapsedHours = msToHours(liveElapsedMs);
   const totalHours = loggedHours + liveElapsedHours;
   const remaining = Math.max(targetHours - totalHours, 0);
@@ -215,6 +273,13 @@ export default function LogbookPage() {
     () => entries.filter((e) => e.category === "overtime").reduce((s, e) => s + e.hours, 0),
     [entries]
   );
+
+  // True only when composing a brand-new entry (not editing an existing
+  // one) dated today, and it's already past 12:00 PM Philippine time — the
+  // point at which picking "Morning" or "Whole day" coverage for today
+  // stops making sense, since that window has already closed.
+  const pastLunchToday =
+    !editingId && draft.date === todayStr() && (toMinutes(nowClock(new Date(liveNow))) ?? 0) >= LUNCH_OUT_AT;
 
   // Milestone notifications — fire once per threshold, remembered across reloads.
   useEffect(() => {
@@ -237,17 +302,54 @@ export default function LogbookPage() {
         });
       }
     }
-    if (changed) setStorage(MILESTONES_KEY, [...milestonesRef.current]);
+    if (changed) setUserStorage(MILESTONES_KEY, userId, [...milestonesRef.current]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [percent, loaded]);
 
-  // Long-shift watch — ticks live while a session is running.
+  // Pre-shift reminder — nudges the trainee about 10 minutes before their
+  // scheduled start time so they remember to open the app and clock in.
+  // Based on the host client they most recently clocked in under (their
+  // Public/Private/Custom schedule set on the Host clients form), and only
+  // on that client's actual working days — a public-office assignment
+  // (Mon–Thu) won't nag on a Friday, for instance. Skipped entirely once
+  // they're already clocked in, or once they've already logged hours for
+  // that client today.
   useEffect(() => {
-    if (!activeSession) {
+    if (!loaded || activeSession) return;
+    const client = clients.find((c) => c.id === lastClientId);
+    if (!client) return;
+    const norm = normalizeClient(client);
+    const today = todayStr();
+    if (!isWorkDay(norm, today)) return;
+    if (shiftReminderFiredRef.current === today) return;
+    if (entries.some((e) => e.date === today && e.client === client.id)) return;
+
+    const nowMin = toMinutes(nowClock(new Date(liveNow)));
+    const startMin = toMinutes(norm.timeIn);
+    if (nowMin === null || startMin === null) return;
+
+    if (nowMin >= startMin - 10 && nowMin < startMin) {
+      shiftReminderFiredRef.current = today;
+      setUserStorage(REMINDER_KEY, userId, today);
+      notify({
+        type: "info",
+        title: "Your OJT shift starts soon",
+        message: `${client.name} starts at ${formatTime12(norm.timeIn)} — you can clock in in about ${startMin - nowMin} minute${startMin - nowMin === 1 ? "" : "s"}.`,
+        system: true,
+        tag: `shift-reminder-${today}`,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveNow, loaded, activeSession, clients, entries, lastClientId]);
+
+  // Long-shift watch — ticks live while a session is actually running (not
+  // while paused for lunch, since elapsedMsSince(null) returns 0).
+  useEffect(() => {
+    if (!activeSession || activeSession.phase === "lunch") {
       longShiftRef.current = new Set();
       return;
     }
-    const hrs = msToHours(elapsedMsSince(activeSession.startedAt));
+    const hrs = msToHours(elapsedMsSince(activeSession.segStartedAt));
     [4, 8, 12].forEach((h) => {
       if (hrs >= h && !longShiftRef.current.has(h)) {
         longShiftRef.current.add(h);
@@ -263,69 +365,235 @@ export default function LogbookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveNow, activeSession]);
 
-  function clockIn() {
-    if (activeSession) return;
-    const session = {
-      client: sessionClient || null,
-      category: sessionCategory,
-      startedAt: new Date().toISOString(),
-      startedClock: nowClock(),
-      startedDate: todayStr(),
-    };
-    setActiveSession(session);
-    setStorage(SESSION_KEY, session);
-    notify({
-      type: "info",
-      title: "Clocked in",
-      message: `${categoryLabel(session.category)} shift started at ${formatTime12(session.startedClock)}.`,
-    });
-  }
-
-  function clockOut() {
-    if (!activeSession) return;
-    const ms = elapsedMsSince(activeSession.startedAt);
-    const hrs = msToHours(ms);
-
-    if (hrs < 0.01) {
-      setActiveSession(null);
-      removeStorage(SESSION_KEY);
-      return;
-    }
-
-    // A clock-in/out session is one continuous stretch, so we file it under
-    // whichever segment of the day it started in — Morning (before noon),
-    // Afternoon (noon–5pm), or Evening (5pm onward) — so it lines up with
-    // the Morning/Afternoon/Evening columns used for manually-added days.
-    const startedMinutes = toMinutes(activeSession.startedClock) ?? 0;
-    const startedSeg = startedMinutes >= EVENING_STARTS_AT ? "ev" : startedMinutes >= 12 * 60 ? "pm" : "am";
-    const clockOutTime = nowClock();
+  // Builds and saves one Morning/Afternoon/Evening segment straight to the
+  // logbook (same shape as a manually-added day), the moment that segment
+  // actually finishes — either because the standard boundary was hit
+  // automatically, or the trainee clocked out early. This is what makes the
+  // reports/PDF reflect real, already-worked hours in real time instead of
+  // waiting for a "whole day" to be assembled first.
+  function saveSegment(session, segKey, inTime, outTime) {
+    const hrs = hoursBetween(inTime, outTime);
+    if (hrs <= 0) return null;
     const entry = {
       id: uid(),
-      date: activeSession.startedDate,
-      amIn: startedSeg === "am" ? activeSession.startedClock : "",
-      amOut: startedSeg === "am" ? clockOutTime : "",
-      pmIn: startedSeg === "pm" ? activeSession.startedClock : "",
-      pmOut: startedSeg === "pm" ? clockOutTime : "",
-      evIn: startedSeg === "ev" ? activeSession.startedClock : "",
-      evOut: startedSeg === "ev" ? clockOutTime : "",
-      client: activeSession.client,
-      category: activeSession.category,
+      date: session.date,
+      amIn: segKey === "am" ? inTime : "",
+      amOut: segKey === "am" ? outTime : "",
+      pmIn: segKey === "pm" ? inTime : "",
+      pmOut: segKey === "pm" ? outTime : "",
+      evIn: segKey === "ev" ? inTime : "",
+      evOut: segKey === "ev" ? outTime : "",
+      client: session.client,
+      category: session.category,
       hours: hrs,
       task: sessionNote.trim(),
     };
     setEntries((prev) => [...prev, entry].sort((a, b) => a.date.localeCompare(b.date)));
+    return entry;
+  }
+
+  // Clocking in starts whichever segment the current Philippine time falls
+  // into — Morning (before 12:00 PM), Afternoon (12:00 PM until the host
+  // client's own end-of-day time), or Evening (after that). Regular/Evening
+  // shifts are then auto-managed: the app itself will clock out for lunch
+  // at noon, resume at 1:00 PM, and clock out automatically once the
+  // client's scheduled end time is reached — 5:00 PM for a public-office
+  // assignment, 6:00 PM for a private-company one, by default (each host
+  // client's own hours, set on the Host clients form, always win).
+  // Overtime is left manual/open-ended since it's meant to run past the
+  // standard hours — the trainee clocks it out themselves.
+  function clockIn() {
+    if (activeSession) return;
+    const nowC = nowClock();
+    const nowMin = toMinutes(nowC) ?? 0;
+    const client = clients.find((c) => c.id === sessionClient);
+    const dayEndAt = client ? toMinutes(normalizeClient(client).timeOut) ?? PM_END_AT : PM_END_AT;
+    const phase = nowMin >= dayEndAt ? "ev" : nowMin >= LUNCH_OUT_AT ? "pm" : "am";
+    const session = {
+      client: sessionClient || null,
+      category: sessionCategory,
+      date: todayStr(),
+      phase,
+      segStart: nowC,
+      segStartedAt: new Date().toISOString(),
+      autoManage: sessionCategory !== "overtime",
+      amSaved: false,
+    };
+    setActiveSession(session);
+    setUserStorage(SESSION_KEY, userId, session);
+    if (sessionClient) setLastClientId(sessionClient);
+    notify({
+      type: "info",
+      title: "Clocked in",
+      message: `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}.`,
+    });
+  }
+
+  // Resolves a session's end-of-day boundary from its assigned host
+  // client's own schedule (Public/Private/Custom, set on the Host clients
+  // form) — falling back to the app's original fixed 5:00 PM for sessions
+  // with no client assigned, so behavior is unchanged for anyone who
+  // hasn't set up a host client yet.
+  function dayEndTimeFor(clientId) {
+    const client = clients.find((c) => c.id === clientId);
+    return client ? normalizeClient(client).timeOut : "17:00";
+  }
+  function dayEndFor(clientId) {
+    return toMinutes(dayEndTimeFor(clientId)) ?? PM_END_AT;
+  }
+
+  // Automatic lunch-out → resume → end-of-day flow. Runs every tick the
+  // live clock updates, compared against Philippine time. Each branch
+  // changes activeSession.phase, which is itself a guard — once a branch
+  // fires, its own condition is no longer true, so it can't double-fire.
+  useEffect(() => {
+    if (!activeSession || !activeSession.autoManage) return;
+    const nowMin = toMinutes(nowClock(new Date(liveNow)));
+    if (nowMin === null) return;
+
+    if (activeSession.phase === "am" && nowMin >= LUNCH_OUT_AT) {
+      saveSegment(activeSession, "am", activeSession.segStart, "12:00");
+      const next = { ...activeSession, phase: "lunch", segStart: "", segStartedAt: null, amSaved: true, lunchReminderSent: false };
+      setActiveSession(next);
+      setUserStorage(SESSION_KEY, userId, next);
+      notify({
+        type: "info",
+        title: "Lunch break — clocked out for lunch",
+        message: `Your ${categoryLabel(activeSession.category)} Morning hours (${formatTime12(activeSession.segStart)}–12:00 PM) were saved to your reports. Lunch hour (12:01 PM–12:59 PM) isn't counted toward your OJT hours — you'll resume at 1:00 PM.`,
+        system: true,
+        tag: "auto-lunch-out",
+      });
+      return;
+    }
+
+    // Heads-up a few minutes before lunch ends, so the reminder isn't a
+    // total surprise at exactly 1:00 PM. Fires once per lunch break
+    // (lunchReminderSent guards it), then the resume branch below still
+    // fires separately once 1:00 PM actually arrives.
+    if (
+      activeSession.phase === "lunch" &&
+      !activeSession.lunchReminderSent &&
+      nowMin >= LUNCH_RESUME_AT - LUNCH_REMINDER_BEFORE_MIN &&
+      nowMin < LUNCH_RESUME_AT
+    ) {
+      const minutesLeft = LUNCH_RESUME_AT - nowMin;
+      const next = { ...activeSession, lunchReminderSent: true };
+      setActiveSession(next);
+      setUserStorage(SESSION_KEY, userId, next);
+      notify({
+        type: "info",
+        title: "Lunch ending soon",
+        message: `Your ${categoryLabel(activeSession.category)} Afternoon time-in starts in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"} (1:00 PM).`,
+        system: true,
+        tag: "auto-lunch-reminder",
+      });
+      return;
+    }
+
+    if (activeSession.phase === "lunch" && nowMin >= LUNCH_RESUME_AT) {
+      const next = { ...activeSession, phase: "pm", segStart: "13:00", segStartedAt: new Date().toISOString() };
+      setActiveSession(next);
+      setUserStorage(SESSION_KEY, userId, next);
+      notify({
+        type: "info",
+        title: "OJT clock-in resumed",
+        message: `Lunch is over — your ${categoryLabel(activeSession.category)} Afternoon shift has resumed at 1:00 PM.`,
+        system: true,
+        tag: "auto-lunch-resume",
+      });
+      return;
+    }
+
+    if (activeSession.phase === "pm" && nowMin >= dayEndFor(activeSession.client)) {
+      const endTime = dayEndTimeFor(activeSession.client);
+      saveSegment(activeSession, "pm", activeSession.segStart, endTime);
+      setActiveSession(null);
+      removeUserStorage(SESSION_KEY, userId);
+      setSessionNote("");
+      notify({
+        type: "success",
+        title: "You've met today's required hours",
+        message: activeSession.amSaved
+          ? `Whole-day ${categoryLabel(activeSession.category)} shift complete (Morning + Afternoon) — today's hours have been saved to your reports.`
+          : `${categoryLabel(activeSession.category)} Afternoon shift complete — today's hours have been saved to your reports.`,
+        system: true,
+        tag: "auto-day-complete",
+      });
+      return;
+    }
+
+    if (activeSession.phase === "ev" && nowMin >= EV_END_AT) {
+      saveSegment(activeSession, "ev", activeSession.segStart, "20:00");
+      setActiveSession(null);
+      removeUserStorage(SESSION_KEY, userId);
+      setSessionNote("");
+      notify({
+        type: "success",
+        title: "You've met today's required hours",
+        message: "Evening shift complete — today's hours have been saved to your reports.",
+        system: true,
+        tag: "auto-day-complete",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveNow, activeSession]);
+
+  function clockOut() {
+    if (!activeSession) return;
+
+    // Ending the day during the lunch break: the Morning segment was
+    // already saved automatically, so there's nothing left to log.
+    if (activeSession.phase === "lunch") {
+      setActiveSession(null);
+      removeUserStorage(SESSION_KEY, userId);
+      setSessionNote("");
+      notify({
+        type: "info",
+        title: "Shift ended at lunch",
+        message: "Your Morning hours were already saved to your reports. No Afternoon hours were logged today.",
+      });
+      return;
+    }
+
+    const clockOutTime = nowClock();
+    const hrs = hoursBetween(activeSession.segStart, clockOutTime);
+
+    if (hrs < 0.01) {
+      setActiveSession(null);
+      removeUserStorage(SESSION_KEY, userId);
+      setSessionNote("");
+      return;
+    }
+
+    const entry = saveSegment(activeSession, activeSession.phase, activeSession.segStart, clockOutTime);
     setActiveSession(null);
-    removeStorage(SESSION_KEY);
+    removeUserStorage(SESSION_KEY, userId);
     setSessionNote("");
 
     notify({
       type: "success",
       title: "Clocked out",
-      message: `Logged ${formatHours(hrs)} for ${entry.date}.`,
+      message: `Logged ${formatHours(entry?.hours ?? hrs)} for ${formatDateLong(activeSession.date)}.`,
       system: true,
       tag: "clock-out",
     });
   }
+
+  // If the Add-day form is left open across the 12:00 PM boundary while set
+  // to Morning or Whole day for today, switch it to Afternoon the moment
+  // that coverage stops being valid, with a heads-up why.
+  useEffect(() => {
+    if (!pastLunchToday) return;
+    if (draftMode === "am" || draftMode === "full") {
+      setShiftMode("pm");
+      notify({
+        type: "info",
+        title: "Switched to Afternoon",
+        message: "It's already past 12:00 PM, so Morning coverage isn't available for today. This entry now covers Afternoon — adjust the times if needed.",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastLunchToday]);
 
   // Switches which segment(s) of the day the manual-entry form captures.
   // Clears the fields for whichever segment doesn't apply, instead of
@@ -349,10 +617,14 @@ export default function LogbookPage() {
   // form is still on the "Whole day" default, nudge the coverage to
   // Afternoon → Evening automatically, since a whole day can't have already
   // happened. Switching back to Regular drops any evening-only coverage.
+  // Likewise, if it's already past noon today, Morning/Whole day aren't in
+  // the allowed list for any category — fall back to whatever the first
+  // still-valid option is.
   function handleCategoryChange(nextCategory) {
     setDraft((d) => ({ ...d, category: nextCategory }));
     const eveningCapable = nextCategory === "overtime" || nextCategory === "evening";
     const nowMinutes = toMinutes(nowClock(new Date(liveNow))) ?? 0;
+    const allowed = coverageOptionsFor(nextCategory, pastLunchToday);
     if (eveningCapable && draft.date === todayStr() && nowMinutes >= EVENING_STARTS_AT && draftMode === "full") {
       setShiftMode("pmev");
       notify({
@@ -362,6 +634,8 @@ export default function LogbookPage() {
       });
     } else if (!eveningCapable && (draftMode === "ev" || draftMode === "pmev")) {
       setShiftMode("full");
+    } else if (!allowed.includes(draftMode)) {
+      setShiftMode(allowed[0] || "pm");
     }
   }
 
@@ -514,19 +788,75 @@ export default function LogbookPage() {
     setConfirmDialog(null);
   }
 
+  function applyClientTypePreset(type) {
+    setNewClientType(type);
+    const d = defaultsForType(type);
+    setNewClientDays(d.days);
+    setNewClientTimeIn(d.timeIn);
+    setNewClientTimeOut(d.timeOut);
+  }
+
+  function toggleNewClientDay(dayId) {
+    setNewClientDays((prev) =>
+      prev.includes(dayId) ? prev.filter((d) => d !== dayId) : [...prev, dayId].sort((a, b) => a - b)
+    );
+  }
+
+  function resetClientForm() {
+    setNewClientName("");
+    applyClientTypePreset("public");
+    setEditingClientId(null);
+  }
+
   function addClient() {
     const name = newClientName.trim();
     if (!name) return;
+    if (!newClientDays.length) {
+      notify({ type: "warning", title: "Pick at least one working day", message: "Select which days this host client's OJT schedule covers." });
+      return;
+    }
+    if (editingClientId) {
+      setClients((prev) =>
+        prev.map((c) =>
+          c.id === editingClientId
+            ? { ...c, name, type: newClientType, days: newClientDays, timeIn: newClientTimeIn, timeOut: newClientTimeOut }
+            : c
+        )
+      );
+      notify({ type: "success", title: "Host client updated", message: `"${name}" schedule was updated.` });
+      resetClientForm();
+      return;
+    }
     if (clients.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
       setNewClientName("");
       return;
     }
-    setClients((prev) => [...prev, { id: uid(), name }]);
-    setNewClientName("");
+    setClients((prev) => [
+      ...prev,
+      { id: uid(), name, type: newClientType, days: newClientDays, timeIn: newClientTimeIn, timeOut: newClientTimeOut },
+    ]);
+    resetClientForm();
+  }
+
+  function startEditClient(id) {
+    const client = clients.find((c) => c.id === id);
+    if (!client) return;
+    const norm = normalizeClient(client);
+    setEditingClientId(id);
+    setNewClientName(norm.name);
+    setNewClientType(norm.type);
+    setNewClientDays(norm.days);
+    setNewClientTimeIn(norm.timeIn);
+    setNewClientTimeOut(norm.timeOut);
+  }
+
+  function cancelClientEdit() {
+    resetClientForm();
   }
 
   function removeClient(id) {
     setClients((prev) => prev.filter((c) => c.id !== id));
+    if (id === editingClientId) resetClientForm();
     notify({ type: "info", title: "Host client removed", message: "The host client was removed from your list." });
   }
 
@@ -583,16 +913,7 @@ export default function LogbookPage() {
     doc.text("On-the-Job Training — Official Duty Time Record", margin + 68, 56);
     doc.setFontSize(9);
     doc.setTextColor(220, 224, 220);
-    doc.text(
-      `Generated in real time on ${generatedAt.toLocaleDateString(undefined, {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })} at ${generatedAt.toLocaleTimeString()}`,
-      margin + 68,
-      72
-    );
+    doc.text(`Generated in real time on ${formatDateTimePH(generatedAt)}`, margin + 68, 72);
 
     // ---------- Trainee + summary block ----------
     let y = 114;
@@ -875,7 +1196,10 @@ export default function LogbookPage() {
               ) : (
                 <span className="avatar">{initialsOf(user?.name)}</span>
               )}
-              <span className="user-name">{user?.name || user?.email}</span>
+              <span className="user-id">
+                <span className="user-name">{user?.name || user?.email}</span>
+                {user?.name && user?.email ? <span className="user-email">{user.email}</span> : null}
+              </span>
             </div>
             <button className="signout-btn" onClick={handleSignOut} aria-label="Sign out">
               <LogOut size={14} /> <span>Sign out</span>
@@ -922,13 +1246,30 @@ export default function LogbookPage() {
                 </div>
                 <p className="clock-hint">Real-time tracking starts the moment you clock in.</p>
               </>
+            ) : activeSession.phase === "lunch" ? (
+              <>
+                <div className="clock-label lunch">
+                  <span className="live-dot lunch-dot" /> On lunch break · not counted toward your hours
+                </div>
+                <div className="clock-digits clock-digits--lunch">Resumes 1:00 PM</div>
+                <div className="clock-controls">
+                  <button className="clock-out-btn" onClick={clockOut}>
+                    <Square size={14} /> End day now
+                  </button>
+                </div>
+                <p className="clock-hint">
+                  Your Morning hours were already saved to your reports. You'll get a heads-up notification{" "}
+                  {LUNCH_REMINDER_BEFORE_MIN} minutes before 1:00 PM, then this app will clock you back in
+                  automatically at 1:00 PM — or end the day now if you're not coming back for the Afternoon.
+                </p>
+              </>
             ) : (
               <>
                 <div className="clock-label live">
-                  <span className="live-dot" /> On duty · {categoryLabel(activeSession.category)} ·{" "}
-                  {clientName(activeSession.client)}
+                  <span className="live-dot" /> On duty · {SEGMENT_LABEL[activeSession.phase]} ·{" "}
+                  {categoryLabel(activeSession.category)} · {clientName(activeSession.client)}
                 </div>
-                <div className="clock-digits">{formatDuration(elapsedMsSince(activeSession.startedAt))}</div>
+                <div className="clock-digits">{formatDuration(elapsedMsSince(activeSession.segStartedAt))}</div>
                 <div className="clock-controls">
                   <input
                     type="text"
@@ -941,7 +1282,15 @@ export default function LogbookPage() {
                   </button>
                 </div>
                 <p className="clock-hint">
-                  Started at {formatTime12(activeSession.startedClock)} on {formatDateLong(activeSession.startedDate)}.
+                  {activeSession.autoManage
+                    ? `Started at ${formatTime12(activeSession.segStart)} on ${formatDateLong(activeSession.date)}. ${
+                        activeSession.phase === "am"
+                          ? "Auto lunch-out at 12:00 PM."
+                          : activeSession.phase === "pm"
+                          ? `Auto clock-out at ${formatTime12(dayEndTimeFor(activeSession.client))}.`
+                          : "Auto clock-out at 8:00 PM."
+                      }`
+                    : `Started at ${formatTime12(activeSession.segStart)} on ${formatDateLong(activeSession.date)}. Overtime runs until you clock out.`}
                 </p>
               </>
             )}
@@ -970,11 +1319,21 @@ export default function LogbookPage() {
               <div className="client-chips">
                 {clients.length === 0 && <span className="chips-empty">No clients added yet</span>}
                 {clients.map((c) => {
+                  const norm = normalizeClient(c);
                   const inUseCount = clientEntryCount(c.id);
                   return (
-                    <span className={`client-chip${inUseCount > 0 ? " in-use" : ""}`} key={c.id}>
-                      {c.name}
+                    <span className={`client-chip${inUseCount > 0 ? " in-use" : ""}${editingClientId === c.id ? " editing" : ""}`} key={c.id}>
+                      <span className="chip-main">
+                        <span className="chip-name">{c.name}</span>
+                        <span className="chip-schedule">
+                          {(COMPANY_TYPES[norm.type] || COMPANY_TYPES.custom).label} · {scheduleDaysLabel(norm)} ·{" "}
+                          {formatTime12(norm.timeIn)}–{formatTime12(norm.timeOut)}
+                        </span>
+                      </span>
                       {inUseCount > 0 && <span className="chip-count">{inUseCount}</span>}
+                      <button onClick={() => startEditClient(c.id)} aria-label={`Edit ${c.name}`} title="Edit schedule">
+                        <Pencil size={11} />
+                      </button>
                       <button
                         onClick={() => requestDeleteClient(c.id)}
                         aria-label={inUseCount > 0 ? `${c.name} is used on ${inUseCount} duty log entries and can't be removed` : `Remove ${c.name}`}
@@ -987,16 +1346,61 @@ export default function LogbookPage() {
                   );
                 })}
               </div>
-              <div className="client-add">
-                <input
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addClient()}
-                  placeholder="e.g. City Hall — IT Office"
-                />
-                <button onClick={addClient} aria-label="Add client">
-                  <Plus size={15} />
-                </button>
+              <div className="client-form">
+                <div className="client-form-row">
+                  <input
+                    className="client-name-input"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    placeholder="e.g. City Hall — IT Office"
+                  />
+                  <div className="client-type-toggle">
+                    {Object.entries(COMPANY_TYPES).map(([key, meta]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={newClientType === key ? "active" : ""}
+                        onClick={() => applyClientTypePreset(key)}
+                      >
+                        {meta.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="client-form-row">
+                  <div className="client-days-toggle">
+                    {WEEKDAYS.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className={newClientDays.includes(d.id) ? "active" : ""}
+                        onClick={() => toggleNewClientDay(d.id)}
+                      >
+                        {d.short}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="client-time-fields">
+                    <input type="time" value={newClientTimeIn} onChange={(e) => setNewClientTimeIn(e.target.value)} />
+                    <span>to</span>
+                    <input type="time" value={newClientTimeOut} onChange={(e) => setNewClientTimeOut(e.target.value)} />
+                  </div>
+                </div>
+                <p className="client-form-hint">
+                  {formatTime12(newClientTimeIn)}–{formatTime12(newClientTimeOut)} ={" "}
+                  {formatHours(dailyHoursFor({ days: newClientDays, timeIn: newClientTimeIn, timeOut: newClientTimeOut }))}{" "}
+                  a day (lunch break already excluded), on {scheduleDaysLabel({ days: newClientDays })}.
+                </p>
+                <div className="client-form-actions">
+                  {editingClientId && (
+                    <button type="button" className="client-cancel-btn" onClick={cancelClientEdit}>
+                      Cancel
+                    </button>
+                  )}
+                  <button type="button" className="client-save-btn" onClick={addClient}>
+                    <Plus size={15} /> {editingClientId ? "Save changes" : "Add host client"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1080,8 +1484,8 @@ export default function LogbookPage() {
 
               <div className="shift-mode-row">
                 <label className="shift-mode-label">Shift coverage</label>
-                <div className={`shift-mode-toggle count-${coverageOptionsFor(draft.category).length}`}>
-                  {coverageOptionsFor(draft.category).map((key) => {
+                <div className={`shift-mode-toggle count-${coverageOptionsFor(draft.category, pastLunchToday).length}`}>
+                  {coverageOptionsFor(draft.category, pastLunchToday).map((key) => {
                     const meta = COVERAGE_META[key];
                     const Icon = meta.icon;
                     return (
@@ -1096,6 +1500,11 @@ export default function LogbookPage() {
                     );
                   })}
                 </div>
+                {pastLunchToday && (
+                  <span className="field-hint">
+                    It's already past 12:00 PM, so Morning / Whole day isn't available for today's entry.
+                  </span>
+                )}
               </div>
 
               <div className="new-field date-field">
