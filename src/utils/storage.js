@@ -44,7 +44,12 @@ function safeParse(raw) {
   // react-secure-storage already returns parsed JS values (it does its own
   // JSON.stringify/parse around the encrypted payload), but plain
   // localStorage in the fallback path returns a raw string — handle both.
-  if (raw !== null && typeof raw === "object") return { ok: true, value: raw };
+  // Objects/arrays, booleans, and numbers all come back pre-parsed from
+  // react-secure-storage — only `undefined` (missing) and raw JSON
+  // strings (the plain-localStorage fallback path) need special handling.
+  if (raw !== null && (typeof raw === "object" || typeof raw === "boolean" || typeof raw === "number")) {
+    return { ok: true, value: raw };
+  }
   if (typeof raw !== "string") return { ok: false, value: undefined };
   try {
     return { ok: true, value: JSON.parse(raw) };
