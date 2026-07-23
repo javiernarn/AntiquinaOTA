@@ -8,6 +8,7 @@ import { NotificationBell, ToastStack } from "../../components/NotificationCente
 import { HelpButton, OnboardingGuide } from "../../components/HelpGuide";
 import ProgressRing from "../../components/ProgressRing";
 import ReportsPanel from "./ReportsPanel";
+import EntryHistoryPanel from "./EntryHistoryPanel";
 import Footer from "../../components/Footer";
 import { getUserStorage, setUserStorage, removeUserStorage, isStorageAvailable } from "../../utils/storage";
 import logo from "../../assets/images/site-logo.png";
@@ -215,7 +216,7 @@ export default function LogbookPage() {
   const shiftReminderFiredRef = useRef(getUserStorage(REMINDER_KEY, userId));
 
   useEffect(() => {
-    const pageName = tab === "reports" ? "Reports" : "Logbook";
+    const pageName = tab === "reports" ? "Reports" : tab === "history" ? "Entry History" : "Logbook";
     document.title = `${pageName} | Logbook - Opol Community College`;
   }, [tab]);
 
@@ -325,6 +326,16 @@ export default function LogbookPage() {
     for (const e of entries) map.set(e.id, liveEntryProgress(e, nowDate));
     return map;
   }, [entries, nowDate]);
+
+  // Once an entry is fully finished (every segment's end time has passed),
+  // it moves out of the Logbook tab's ledger and into the Entry History
+  // tab instead — so the ledger only ever shows what's still Scheduled or
+  // In progress and doesn't grow into a long scroll of old, settled days.
+  const ledgerEntries = useMemo(
+    () => entries.filter((e) => entryProgress.get(e.id)?.status !== "complete"),
+    [entries, entryProgress]
+  );
+  const completedCount = entries.length - ledgerEntries.length;
 
   // True the moment any entry has started but hasn't finished yet (its
   // scheduled end time is still in the future) — used to gate the Reports
@@ -842,6 +853,8 @@ export default function LogbookPage() {
     setDraft(emptyDraft());
     setDraftMode("full");
   }
+
+
 
   // Checks a draft against the app's rules before it's saved: a date is
   // required, a host client is required, at least one time segment must be
@@ -1615,6 +1628,9 @@ export default function LogbookPage() {
           <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>
             Logbook
           </button>
+          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+            Entry History{completedCount > 0 ? ` (${completedCount})` : ""}
+          </button>
           <button className={tab === "reports" ? "active" : ""} onClick={() => setTab("reports")}>
             Reports
           </button>
@@ -1638,7 +1654,13 @@ export default function LogbookPage() {
               <div className="empty-row">No entries yet — clock in above or add a day manually below.</div>
             )}
 
-            {entries
+            {entries.length > 0 && ledgerEntries.length === 0 && (
+              <div className="empty-row">
+                No scheduled or in-progress entries right now — completed days have moved to the Entry History tab.
+              </div>
+            )}
+
+            {ledgerEntries
               .slice()
               .reverse()
               .map((e) => (
@@ -1931,6 +1953,10 @@ export default function LogbookPage() {
                   : "Loading…"}
               </span>
             </div>
+          </section>
+        ) : tab === "history" ? (
+          <section className="ledger-card">
+            <EntryHistoryPanel entries={entries} clients={clients} now={nowDate} />
           </section>
         ) : (
           <section className="reports-card">
