@@ -11,6 +11,7 @@ import ReportsPanel from "./ReportsPanel";
 import EntryHistoryPanel from "./EntryHistoryPanel";
 import Footer from "../../components/Footer";
 import { getUserStorage, setUserStorage, removeUserStorage, isStorageAvailable } from "../../utils/storage";
+import { syncActiveSession, syncClients } from "../../utils/cloudSync";
 import logo from "../../assets/images/site-logo.png";
 import { LOGO_BASE64 } from "../../assets/logoBase64";
 import {
@@ -207,6 +208,22 @@ export default function LogbookPage() {
   const [sessionClient, setSessionClient] = useState("");
   const [sessionCategory, setSessionCategory] = useState("regular");
   const [sessionNote, setSessionNote] = useState("");
+
+  // Mirror the live clock-in state to Firestore so the server-side
+  // scheduler (Cloud Functions) can send the exact same pre-shift /
+  // lunch / end-of-day reminders as real push notifications — the ones
+  // below via notify({system:true}) only reach this browser tab while
+  // it's open. Both fire off the same state, they just reach different
+  // places. No-ops entirely if Firebase isn't configured.
+  useEffect(() => {
+    if (!loaded) return;
+    syncActiveSession(activeSession);
+  }, [activeSession, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    syncClients(clients, lastClientId);
+  }, [clients, lastClientId, loaded]);
 
   const milestonesRef = useRef(new Set(getUserStorage(MILESTONES_KEY, userId) || []));
   const longShiftRef = useRef(new Set());

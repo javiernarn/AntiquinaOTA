@@ -7,6 +7,7 @@ import {
   requestPermission,
 } from "../utils/notifications";
 import { uid } from "../utils/time";
+import { registerDeviceForPush } from "../utils/cloudSync";
 
 const HISTORY_KEY = "notifications-v1";
 const MAX_HISTORY = 40;
@@ -65,6 +66,28 @@ export function NotificationProvider({ children }) {
     window.setTimeout(() => dismissToast(item.id), TOAST_LIFETIME_MS);
     return item.id;
   }, [dismissToast]);
+
+  // Re-register for push on every load — not just right after sign-in.
+  // Firebase Auth's own session survives a page reload (it persists to
+  // IndexedDB independently of this app's local session), so a returning,
+  // already-signed-in trainee should still get their device token
+  // refreshed without having to sign out and back in.
+  useEffect(() => {
+    if (!userId) return;
+    registerDeviceForPush();
+  }, [userId]);
+
+  // A push that arrives while this tab is open and focused is delivered
+  // straight to the page (not the service worker) — show it the same way
+  // as any other in-app notification.
+  useEffect(() => {
+    function onCloudPush(e) {
+      if (!e.detail?.title) return;
+      notify({ type: "info", title: e.detail.title, message: e.detail.message || "" });
+    }
+    window.addEventListener("cloud-push", onCloudPush);
+    return () => window.removeEventListener("cloud-push", onCloudPush);
+  }, [notify]);
 
   const enableSystemNotifications = useCallback(async () => {
     const result = await requestPermission();

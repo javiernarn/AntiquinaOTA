@@ -30,6 +30,7 @@ export default function GoogleSignInButton({ onSuccess, onError }) {
               email: profile.email,
               picture: profile.picture,
               sub: profile.sub,
+              idToken: response.credential,
             });
           } catch (e) {
             onError?.(e);

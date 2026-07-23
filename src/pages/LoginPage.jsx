@@ -4,6 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 import GoogleSignInButton from "../components/GoogleSignInButton";
 import Footer from "../components/Footer";
 import logo from "../assets/images/site-logo.png";
+import { signInToCloud, registerDeviceForPush } from "../utils/cloudSync";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -17,6 +18,14 @@ export default function LoginPage() {
   const handleSuccess = useCallback(
     (profile) => {
       login(profile);
+      // Best-effort — if Firebase isn't configured, or the person declines
+      // the notification permission prompt, the rest of the app still
+      // works exactly as before. Don't block navigation on this.
+      if (profile.idToken) {
+        signInToCloud(profile.idToken).then((uid) => {
+          if (uid) registerDeviceForPush();
+        });
+      }
       // Route through the loading screen again — MainPage checks
       // isAuthenticated and will forward to /logbook automatically.
       navigate("/", { replace: true, state: { from: "login" } });
