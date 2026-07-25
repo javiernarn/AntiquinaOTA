@@ -1398,7 +1398,7 @@ export default function LogbookPage() {
         <header className={`duty-topbar${scrolled ? " is-scrolled" : ""}`}>
           <div className="brand">
             <img className="brand-logo" src={logo} alt="Opol Community College logo" />
-            <div>
+            <div className="brand-text">
               <div className="brand-eyebrow">OCC</div>
               <div className="brand-title">Duty Log</div>
               <div className="brand-sub">{user?.school || "Opol Community College"}</div>
