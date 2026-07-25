@@ -65,60 +65,10 @@ In the Firebase console, for this project:
   VITE_FIREBASE_VAPID_KEY=...
   ```
 
-## 3. Run the reminder scan on a schedule
-
-The scan logic (`api/_lib/reminderScan.js`) needs *something* to trigger it
-every minute or two. There are two ways to do that — pick based on
-whether you have a card to link to Google Cloud billing.
-
-### 3a. No credit card? Use the free Vercel + cron-job.org path (recommended)
-
-This is what's set up by default. `api/send-reminders.js` is a Vercel
-serverless function (deploys automatically with the rest of the app, no
-extra command) that does the scan when called. An outside free service
-pings it every few minutes.
-
-1. **Get a Firebase service account key** (this does NOT require Blaze —
-   it's just an API credential): Firebase console → gear icon → **Project
-   settings → Service accounts** → **Generate new private key**. A JSON
-   file downloads.
-2. **Base64-encode it** so it can go in a single environment variable.
-   With the file saved as `serviceAccountKey.json` in your project folder:
-   ```bash
-   node -e "console.log(Buffer.from(require('fs').readFileSync('serviceAccountKey.json')).toString('base64'))"
-   ```
-   Copy the long output string.
-3. **Pick a secret password** — anything random/hard to guess, e.g.
-   `openssl rand -hex 16` (Mac/Linux) or just mash the keyboard for 30
-   characters. This stops strangers from triggering your endpoint.
-4. **Add both to Vercel**: Project → Settings → Environment Variables:
-   - `FIREBASE_SERVICE_ACCOUNT_B64` = the base64 string from step 2
-   - `CRON_SECRET` = the secret you picked in step 3
-
-   (Do **not** prefix these with `VITE_` — that would ship them to the
-   browser. These two are server-only.)
-5. **Redeploy** on Vercel so the env vars take effect.
-6. **Set up the free cron trigger** at https://cron-job.org (free, no
-   card): create an account, add a new cron job:
-   - URL: `https://YOUR-APP.vercel.app/api/send-reminders?secret=YOUR_CRON_SECRET`
-   - Schedule: every 1–5 minutes
-   - Save and enable it.
-
-   (GitHub Actions' `schedule:` trigger is a fine alternative if you'd
-   rather keep it in your repo — same idea, it just curls the same URL.)
-7. Delete the local `serviceAccountKey.json` file once you've copied its
-   base64 value — don't commit it anywhere.
-
-Still deploy the Firestore rules once (this part doesn't need Blaze):
-```bash
-firebase deploy --only firestore:rules
-```
-
-### 3b. Have a card? Use Firebase Cloud Functions instead
+## 3. Deploy the Firestore rules and the scheduled function
 
 The rules (`firestore.rules`) and the function (`functions/index.js`) are
-already written as an alternative — same reminder logic, running on
-Firebase's own scheduler instead of an outside cron service.
+already written — you just need the Firebase CLI to ship them.
 
 ```bash
 npm install -g firebase-tools
@@ -132,8 +82,7 @@ firebase deploy --only firestore:rules,functions
 The first deploy will prompt you to **upgrade to the Blaze plan** — this
 is required for any scheduled (cron-style) Cloud Function. You still won't
 be billed anything at this scale; Blaze just removes the free-tier cap and
-switches to pay-per-use above the free quota. If you go this route, skip
-3a entirely — you don't need both.
+switches to pay-per-use above the free quota.
 
 ## 4. Install the new npm dependency and set env vars
 
