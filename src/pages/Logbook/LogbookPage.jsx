@@ -7,6 +7,7 @@ import { useLiveClock } from "../../hooks/useLiveClock";
 import { NotificationBell, ToastStack } from "../../components/NotificationCenter";
 import { HelpButton, OnboardingGuide } from "../../components/HelpGuide";
 import ProgressRing from "../../components/ProgressRing";
+import TimeInput12 from "../../components/TimeInput12";
 import ReportsPanel from "./ReportsPanel";
 import EntryHistoryPanel from "./EntryHistoryPanel";
 import Footer from "../../components/Footer";
@@ -32,6 +33,7 @@ import {
   monthKey,
   formatMonthLabel,
   formatDateTimePH,
+  weekdayOf,
 } from "../../utils/time";
 import { completionFor } from "../../utils/dutyStatus";
 import { liveEntryProgress } from "../../utils/liveProgress";
@@ -396,6 +398,19 @@ export default function LogbookPage() {
   const draftSelectedClient = clients.find((c) => c.id === draft.client) || null;
   const draftClientCoverage = draftSelectedClient ? clientCoverage(draftSelectedClient) : null;
 
+  // True when the selected host client's own schedule doesn't include the
+  // weekday of this entry's date — e.g. a Mon–Fri client picked for a
+  // Saturday entry. The client can still be selected (some trainees do get
+  // asked to cover an extra day), but the form surfaces a hint so it's
+  // clear why, with a nudge to either add a separate host client for that
+  // day or edit this one's schedule.
+  const draftClientDayMismatch =
+    draftSelectedClient && draft.date && !isWorkDay(draftSelectedClient, draft.date);
+  const FULL_WEEKDAYS = {
+    1: "Monday", 2: "Tuesday", 3: "Wednesday", 4: "Thursday", 5: "Friday", 6: "Saturday", 7: "Sunday",
+  };
+  const draftDateWeekdayLabel = draft.date ? FULL_WEEKDAYS[weekdayOf(draft.date)] : "";
+
   // Milestone notifications — fire once per threshold, remembered across reloads.
   useEffect(() => {
     if (!loaded) return;
@@ -421,7 +436,7 @@ export default function LogbookPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [percent, loaded]);
 
-  // Pre-shift reminder — nudges the trainee about 10 minutes before their
+  // Pre-shift reminder — nudges the trainee about 20 minutes before their
   // scheduled start time so they remember to open the app and clock in.
   // Based on the host client they most recently clocked in under (their
   // Public/Private/Custom schedule set on the Host clients form), and only
@@ -429,6 +444,13 @@ export default function LogbookPage() {
   // (Mon–Thu) won't nag on a Friday, for instance. Skipped entirely once
   // they're already clocked in, or once they've already logged hours for
   // that client today.
+  //
+  // This only fires while this tab is open and in the foreground — it's a
+  // same-tab fallback. The real "reaches the phone even with the app
+  // closed" reminder is the scheduled push sent server-side by
+  // functions/index.js (shiftReminders), which runs this same 20-minute-
+  // before check for every host client on every trainee's account, not
+  // just the most recent one.
   useEffect(() => {
     if (!loaded || activeSession) return;
     const client = clients.find((c) => c.id === lastClientId);
@@ -443,7 +465,7 @@ export default function LogbookPage() {
     const startMin = toMinutes(norm.timeIn);
     if (nowMin === null || startMin === null) return;
 
-    if (nowMin >= startMin - 10 && nowMin < startMin) {
+    if (nowMin >= startMin - 20 && nowMin < startMin) {
       shiftReminderFiredRef.current = today;
       setUserStorage(REMINDER_KEY, userId, today);
       notify({
@@ -783,6 +805,19 @@ export default function LogbookPage() {
       pmOut: d.pmOut && norm ? (cov && cov.ev ? "17:00" : norm.timeOut) : d.pmOut,
       evOut: d.evOut && norm ? (cov && cov.ev ? norm.timeOut : d.evOut) : d.evOut,
     }));
+    // A host client's schedule is set up with specific working days (e.g.
+    // Mon–Fri). If this entry's date falls outside those days, the client
+    // is still selectable — but flag it, since it usually means either the
+    // wrong host client was picked, or this host client's schedule needs
+    // updating to include this day.
+    if (client && draft.date && !isWorkDay(client, draft.date)) {
+      const weekday = FULL_WEEKDAYS[weekdayOf(draft.date)];
+      notify({
+        type: "warning",
+        title: `"${client.name}" isn't scheduled for ${weekday}`,
+        message: `Its OJT days are set to ${scheduleDaysLabel(client)}. If you actually reported to "${client.name}" this ${weekday}, edit it under Host clients to add ${weekday} to its schedule. Otherwise, add a separate host client for this day.`,
+      });
+    }
     // A host client's own hours cap which shift-coverage options actually
     // make sense (e.g. picking a 1:00 PM–8:00 PM afternoon-only client
     // while "Morning only" or "Whole day" was selected). If the current
@@ -1616,9 +1651,9 @@ export default function LogbookPage() {
                     ))}
                   </div>
                   <div className="client-time-fields">
-                    <input type="time" value={newClientTimeIn} onChange={(e) => setNewClientTimeIn(e.target.value)} />
+                    <TimeInput12 aria-label="Time in" value={newClientTimeIn} onChange={setNewClientTimeIn} />
                     <span>to</span>
-                    <input type="time" value={newClientTimeOut} onChange={(e) => setNewClientTimeOut(e.target.value)} />
+                    <TimeInput12 aria-label="Time out" value={newClientTimeOut} onChange={setNewClientTimeOut} />
                   </div>
                 </div>
                 <p className="client-form-hint">
@@ -1802,18 +1837,18 @@ export default function LogbookPage() {
                     <div className="segment-group-fields">
                       <div className="new-field">
                         <label>Morning in</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Morning in"
                           value={draft.amIn}
-                          onChange={(e) => setDraft((d) => ({ ...d, amIn: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, amIn: v }))}
                         />
                       </div>
                       <div className="new-field">
                         <label>Lunch out</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Lunch out"
                           value={draft.amOut}
-                          onChange={(e) => setDraft((d) => ({ ...d, amOut: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, amOut: v }))}
                         />
                       </div>
                     </div>
@@ -1825,18 +1860,18 @@ export default function LogbookPage() {
                     <div className="segment-group-fields">
                       <div className="new-field">
                         <label>Lunch in</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Lunch in"
                           value={draft.pmIn}
-                          onChange={(e) => setDraft((d) => ({ ...d, pmIn: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, pmIn: v }))}
                         />
                       </div>
                       <div className="new-field">
                         <label>Afternoon out</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Afternoon out"
                           value={draft.pmOut}
-                          onChange={(e) => setDraft((d) => ({ ...d, pmOut: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, pmOut: v }))}
                         />
                       </div>
                     </div>
@@ -1849,18 +1884,18 @@ export default function LogbookPage() {
                     <div className="segment-group-fields">
                       <div className="new-field">
                         <label>Evening in</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Evening in"
                           value={draft.evIn}
-                          onChange={(e) => setDraft((d) => ({ ...d, evIn: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, evIn: v }))}
                         />
                       </div>
                       <div className="new-field">
                         <label>Evening out</label>
-                        <input
-                          type="time"
+                        <TimeInput12
+                          aria-label="Evening out"
                           value={draft.evOut}
-                          onChange={(e) => setDraft((d) => ({ ...d, evOut: e.target.value }))}
+                          onChange={(v) => setDraft((d) => ({ ...d, evOut: v }))}
                         />
                       </div>
                     </div>
@@ -1887,6 +1922,13 @@ export default function LogbookPage() {
                       </option>
                     ))}
                   </select>
+                  {draftClientDayMismatch && (
+                    <span className="field-hint field-hint-warning">
+                      "{draftSelectedClient.name}" is scheduled {scheduleDaysLabel(draftSelectedClient)}, not{" "}
+                      {draftDateWeekdayLabel}. If this is right, edit "{draftSelectedClient.name}" under Host clients
+                      to add {draftDateWeekdayLabel} — or add it as a separate host client instead.
+                    </span>
+                  )}
                 </div>
                 <div className="new-field">
                   <label>Shift type</label>

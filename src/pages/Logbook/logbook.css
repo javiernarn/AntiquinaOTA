@@ -304,11 +304,49 @@ select {
 .client-type-toggle button.active, .client-days-toggle button.active {
   background: var(--evening); color: var(--paper); border-color: var(--evening);
 }
-.client-time-fields { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
-.client-time-fields input {
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px 8px; font-size: 13px; background: var(--card);
+.client-time-fields { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+/* ---------- 12-hour time picker (replaces native input[type=time], whose
+   12h/24h display otherwise depends on the device's own locale settings) ---------- */
+.time12 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
+.time12-hour, .time12-minute {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 6px 4px;
+  font-size: 13px;
+  font-family: 'IBM Plex Mono', monospace;
+  text-align: center;
+  min-width: 0;
+  flex: 1 1 38px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.time12-hour:focus, .time12-minute:focus { outline: none; border-color: var(--brass); }
+.time12-colon { color: var(--ink-soft); font-weight: 700; flex-shrink: 0; }
+.time12-period {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.time12-period button {
+  background: var(--card);
+  border: none;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 6px 7px;
+  cursor: pointer;
+}
+.time12-period button + button { border-left: 1px solid var(--line); }
+.time12-period button.active { background: var(--evening); color: var(--paper); }
+
 .client-form-hint { font-size: 11px; color: var(--ink-soft); margin: 0; }
 .client-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .client-save-btn {
@@ -555,6 +593,15 @@ select {
   display: block;
   font-size: 10.5px; color: var(--ink-soft); font-style: italic; line-height: 1.3; margin-top: 6px;
 }
+.field-hint-warning {
+  color: #8A6A22;
+  background: var(--brass-soft);
+  font-style: normal;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--brass);
+}
 
 /* ---------- Date field (its own row, never fights another field for space) ---------- */
 .date-field { max-width: 220px; margin-bottom: 2px; }
@@ -599,15 +646,14 @@ select {
   .segment-group-fields { grid-template-columns: 1fr 1fr; }
 }
 .segment-group-fields .new-field { min-width: 0; }
-.new-field input[type="time"],
 .new-field input[type="date"] {
-  min-width: 0; /* iOS gives native time/date controls a wide intrinsic
-                   size — without this, a grid/flex track can be forced
-                   wider than its column and the field spills into its
-                   neighbor or off the edge of the card. */
+  min-width: 0; /* iOS gives the native date control a wide intrinsic size —
+                   without this, a grid/flex track can be forced wider than
+                   its column and the field spills into its neighbor or off
+                   the edge of the card. */
   max-width: 100%;
   box-sizing: border-box;
-  /* Mobile Safari's native time/date control also carries built-in chrome
+  /* Mobile Safari's native date control also carries built-in chrome
      padding that isn't part of the CSS box, so it can visually poke past
      a width:100% box even once the box itself is sized correctly.
      Resetting the platform appearance makes it obey our own border/
@@ -615,6 +661,7 @@ select {
   -webkit-appearance: none;
   appearance: none;
 }
+.new-field .time12 { max-width: 100%; }
 
 /* ---------- Total strip: a distinct full-width summary bar, always on its
    own row below every segment group so it never overlaps a time input. ---------- */
@@ -872,11 +919,15 @@ select {
   .clock-controls input,
   .setup-field input,
   .client-name-input,
-  .client-time-fields input,
   .new-field input,
   .new-field select {
     font-size: 16px;
   }
+  .time12-hour, .time12-minute {
+    font-size: 16px; /* iOS Safari zooms in on any select under 16px on focus */
+    padding: 6px 2px;
+  }
+  .time12-period button { font-size: 10px; padding: 6px 5px; }
 }
 
 /* ---------- Responsive: all mobile phones — ledger becomes a card list ---------- */

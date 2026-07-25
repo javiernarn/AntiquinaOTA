@@ -263,10 +263,15 @@ button, input, select {
 }
 
 .notif-panel {
-  position: absolute;
-  right: 0;
-  top: 44px;
+  /* Base/fallback values — actual position and width are computed in JS
+     (see usePanelPosition in NotificationCenter.jsx) and applied as an
+     inline style so the panel always stays fully inside the viewport,
+     regardless of where the bell button sits on screen. */
+  position: fixed;
+  right: 12px;
+  top: 60px;
   width: 320px;
+  max-width: calc(100vw - 24px);
   max-height: 380px;
   background: var(--card);
   border: 1px solid var(--line);

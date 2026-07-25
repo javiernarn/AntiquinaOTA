@@ -12,11 +12,47 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// Anchors the notification panel to the bell button and clamps it to stay
+// fully within the viewport. The bell isn't always near the true right edge
+// of the screen — help/avatar/sign-out buttons often sit further right of
+// it — so a panel simply right-aligned to the bell can spill off the left
+// edge on narrow phones. Positioning it with fixed coordinates computed
+// from the bell's actual on-screen position keeps it fully visible on any
+// screen width.
+function usePanelPosition(open, anchorRef) {
+  const [style, setStyle] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function place() {
+      const btn = anchorRef.current?.querySelector(".bell-btn");
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const margin = 12;
+      const panelWidth = Math.min(320, window.innerWidth - margin * 2);
+      let left = rect.right - panelWidth; // right-align to the bell by default
+      left = Math.max(margin, Math.min(left, window.innerWidth - panelWidth - margin));
+      setStyle({
+        position: "fixed",
+        top: rect.bottom + 8,
+        left,
+        width: panelWidth,
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, anchorRef]);
+
+  return style;
+}
+
 export function NotificationBell() {
   const { history, unreadCount, markAllRead, clearHistory, permission, enableSystemNotifications } =
     useNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
+  const panelStyle = usePanelPosition(open, ref);
 
   useEffect(() => {
     function onClick(e) {
@@ -42,7 +78,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="notif-panel">
+        <div className="notif-panel" style={panelStyle || undefined}>
           <div className="notif-panel-head">
             <span>Notifications</span>
             <button className="icon-btn" onClick={clearHistory} aria-label="Clear all">
