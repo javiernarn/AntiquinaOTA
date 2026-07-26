@@ -9,9 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: nowrap; /* never drop the action icons to a second row — brand text
-                         shrinks/truncates instead so this always fits one line */
+  gap: 12px;
+  flex-wrap: wrap;
   background: var(--paper);
   padding: 16px 0 14px;
   padding-top: calc(16px + env(safe-area-inset-top)); /* clears the status bar / notch once installed as an app */
@@ -24,14 +23,7 @@
   box-shadow: 0 4px 14px rgba(22, 33, 28, 0.06);
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;     /* allow this side to shrink below its content width */
-  flex: 1 1 auto;
-  overflow: hidden;
-}
+.brand { display: flex; align-items: center; gap: 12px; }
 .brand-logo {
   width: 46px; height: 46px;
   object-fit: contain;
@@ -42,10 +34,6 @@
   box-shadow: var(--shadow);
   flex-shrink: 0;
 }
-.brand-text {
-  min-width: 0;   /* required for text-overflow ellipsis to work inside a flex item */
-  overflow: hidden;
-}
 .brand-eyebrow {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10.5px;
@@ -53,24 +41,12 @@
   letter-spacing: 1.4px;
   color: var(--brass);
   margin-bottom: 1px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.brand-title {
-  font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; line-height: 1.15;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.brand-sub {
-  font-size: 11.5px; color: var(--ink-soft);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.brand-title { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 18px; line-height: 1.15; }
+.brand-sub { font-size: 11.5px; color: var(--ink-soft); }
 
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;   /* keep the icon row full-size — the brand shrinks first */
-}
-.user-chip { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.user-chip { display: flex; align-items: center; gap: 8px; }
 .avatar {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -304,49 +280,11 @@ select {
 .client-type-toggle button.active, .client-days-toggle button.active {
   background: var(--evening); color: var(--paper); border-color: var(--evening);
 }
-.client-time-fields { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
-/* ---------- 12-hour time picker (replaces native input[type=time], whose
-   12h/24h display otherwise depends on the device's own locale settings) ---------- */
-.time12 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
+.client-time-fields { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+.client-time-fields input {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; font-size: 13px; background: var(--card);
 }
-.time12-hour, .time12-minute {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
-  padding: 6px 4px;
-  font-size: 13px;
-  font-family: 'IBM Plex Mono', monospace;
-  text-align: center;
-  min-width: 0;
-  flex: 1 1 38px;
-  -webkit-appearance: none;
-  appearance: none;
-}
-.time12-hour:focus, .time12-minute:focus { outline: none; border-color: var(--brass); }
-.time12-colon { color: var(--ink-soft); font-weight: 700; flex-shrink: 0; }
-.time12-period {
-  display: flex;
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.time12-period button {
-  background: var(--card);
-  border: none;
-  color: var(--ink-soft);
-  font-size: 10.5px;
-  font-weight: 700;
-  padding: 6px 7px;
-  cursor: pointer;
-}
-.time12-period button + button { border-left: 1px solid var(--line); }
-.time12-period button.active { background: var(--evening); color: var(--paper); }
-
 .client-form-hint { font-size: 11px; color: var(--ink-soft); margin: 0; }
 .client-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .client-save-btn {
@@ -593,15 +531,6 @@ select {
   display: block;
   font-size: 10.5px; color: var(--ink-soft); font-style: italic; line-height: 1.3; margin-top: 6px;
 }
-.field-hint-warning {
-  color: #8A6A22;
-  background: var(--brass-soft);
-  font-style: normal;
-  font-weight: 600;
-  padding: 6px 8px;
-  border-radius: 7px;
-  border: 1px solid var(--brass);
-}
 
 /* ---------- Date field (its own row, never fights another field for space) ---------- */
 .date-field { max-width: 220px; margin-bottom: 2px; }
@@ -646,14 +575,15 @@ select {
   .segment-group-fields { grid-template-columns: 1fr 1fr; }
 }
 .segment-group-fields .new-field { min-width: 0; }
+.new-field input[type="time"],
 .new-field input[type="date"] {
-  min-width: 0; /* iOS gives the native date control a wide intrinsic size —
-                   without this, a grid/flex track can be forced wider than
-                   its column and the field spills into its neighbor or off
-                   the edge of the card. */
+  min-width: 0; /* iOS gives native time/date controls a wide intrinsic
+                   size — without this, a grid/flex track can be forced
+                   wider than its column and the field spills into its
+                   neighbor or off the edge of the card. */
   max-width: 100%;
   box-sizing: border-box;
-  /* Mobile Safari's native date control also carries built-in chrome
+  /* Mobile Safari's native time/date control also carries built-in chrome
      padding that isn't part of the CSS box, so it can visually poke past
      a width:100% box even once the box itself is sized correctly.
      Resetting the platform appearance makes it obey our own border/
@@ -661,7 +591,6 @@ select {
   -webkit-appearance: none;
   appearance: none;
 }
-.new-field .time12 { max-width: 100%; }
 
 /* ---------- Total strip: a distinct full-width summary bar, always on its
    own row below every segment group so it never overlaps a time input. ---------- */
@@ -919,15 +848,11 @@ select {
   .clock-controls input,
   .setup-field input,
   .client-name-input,
+  .client-time-fields input,
   .new-field input,
   .new-field select {
     font-size: 16px;
   }
-  .time12-hour, .time12-minute {
-    font-size: 16px; /* iOS Safari zooms in on any select under 16px on focus */
-    padding: 6px 2px;
-  }
-  .time12-period button { font-size: 10px; padding: 6px 5px; }
 }
 
 /* ---------- Responsive: all mobile phones — ledger becomes a card list ---------- */
@@ -935,14 +860,11 @@ select {
   .duty-page {
     padding: 0 10px calc(14px + env(safe-area-inset-bottom));
   }
-  .duty-topbar { padding: 12px 0 10px; padding-top: calc(12px + env(safe-area-inset-top)); margin-bottom: 12px; gap: 8px; }
-  .brand { gap: 8px; }
+  .duty-topbar { padding: 12px 0 10px; padding-top: calc(12px + env(safe-area-inset-top)); margin-bottom: 12px; }
   .brand-title { font-size: 16px; }
   .brand-logo { width: 40px; height: 40px; }
   .user-id { display: none; } /* keep the topbar compact on narrow phones */
   .signout-btn span { display: none; }
-  .signout-btn { padding: 8px 10px; }
-  .topbar-actions { gap: 6px; }
 
   .clock-digits { font-size: 32px; }
   .ring-hours { font-size: 20px; }
@@ -1012,9 +934,4 @@ select {
   .duty-setup, .duty-hero { padding: 14px; }
   .ring-footnote { font-size: 11px; }
   .shift-mode-toggle button { font-size: 10.2px; padding: 8px 2px; gap: 3px; }
-
-  .brand-sub { display: none; } /* school name is the least essential label — drop it first */
-  .brand-logo { width: 34px; height: 34px; }
-  .brand-title { font-size: 14.5px; }
-  .help-btn, .bell-btn { width: 32px; height: 32px; }
 }

@@ -1,31 +1,20 @@
-// Server-side reminder scheduler.
+// Same logic as functions/index.js, just running as a Vercel serverless
+// function instead of a Firebase Cloud Function — so it works on
+// Firebase's free "Spark" plan with no credit card, using Vercel's own
+// free cron/serverless tier instead of Blaze.
 //
-// This is the "outside the app" half of the notification system. It's a
-// deliberate mirror of the timing rules already in
-// src/pages/Logbook/LogbookPage.jsx (pre-shift, lunch-out, lunch-ending,
-// lunch-resume, end-of-day) — same minute boundaries, same 10-minute
-// heads-up window — but running on a server clock instead of the
-// trainee's open browser tab, so it can push a real OS notification to
-// their phone whether the app is open, backgrounded, or fully closed.
-//
-// It reads only the small slice of state the client mirrors to Firestore
-// (users/{uid}.activeSession, .clients, .lastClientId) — see
-// src/utils/cloudSync.js for the client side of that mirror. Full entry
-// history / logbook data never leaves the trainee's device.
+// Trigger: an outside cron service (see PUSH_NOTIFICATIONS_SETUP.md §3b)
+// hits /api/send-reminders every few minutes. This file does the actual
+// "who needs a reminder right now" work.
 
-const { onSchedule } = require("firebase-functions/v2/scheduler");
-const admin = require("firebase-admin");
-
-admin.initializeApp();
-const db = admin.firestore();
-const messaging = admin.messaging();
+import admin from "firebase-admin";
 
 const TIMEZONE = "Asia/Manila";
 
-const LUNCH_OUT_AT = 12 * 60; // 12:00 PM
-const LUNCH_RESUME_AT = 13 * 60; // 1:00 PM
-const PM_END_AT = 17 * 60; // 5:00 PM fallback (no host client assigned)
-const EV_END_AT = 20 * 60; // 8:00 PM
+const LUNCH_OUT_AT = 12 * 60;
+const LUNCH_RESUME_AT = 13 * 60;
+const PM_END_AT = 17 * 60;
+const EV_END_AT = 20 * 60;
 
 const PRESHIFT_BEFORE_MIN = 10;
 const LUNCH_REMINDER_BEFORE_MIN = 10;
@@ -44,10 +33,9 @@ function nowMinutes(date) {
 }
 
 function todayStr(date) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(date); // YYYY-MM-DD
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(date);
 }
 
-// 1=Mon … 7=Sun, matching src/utils/schedule.js's WEEKDAYS.
 function weekday(date) {
   const short = new Intl.DateTimeFormat("en-US", { timeZone: TIMEZONE, weekday: "short" }).format(date);
   return { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[short];
@@ -70,15 +58,12 @@ function formatTime12(hhmm) {
   return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-// Decides whether *this* user should get a push right now, and which one.
-// Returns { title, body, flagKey } or null.
 function pickReminder({ activeSession, clients, lastClientId, nowMin, wd, alreadySent }) {
   if (!activeSession) {
     const client = (clients || []).find((c) => c.id === lastClientId);
     if (!client || !Array.isArray(client.days) || !client.days.includes(wd)) return null;
     const startMin = toMinutes(client.timeIn);
-    if (startMin === null) return null;
-    if (alreadySent.preShift) return null;
+    if (startMin === null || alreadySent.preShift) return null;
     if (nowMin >= startMin - PRESHIFT_BEFORE_MIN && nowMin < startMin) {
       const left = startMin - nowMin;
       return {
@@ -129,7 +114,15 @@ function pickReminder({ activeSession, clients, lastClientId, nowMin, wd, alread
   return null;
 }
 
-async function sendToUser(uid, reminder) {
+function getAdminApp() {
+  if (admin.apps.length) return admin.app();
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+  if (!b64) throw new Error("Missing FIREBASE_SERVICE_ACCOUNT_B64 env var");
+  const serviceAccount = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+  return admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+}
+
+async function sendToUser(db, messaging, uid, reminder) {
   const devicesSnap = await db.collection("users").doc(uid).collection("devices").get();
   const tokens = devicesSnap.docs.map((d) => d.id);
   if (!tokens.length) return;
@@ -141,8 +134,6 @@ async function sendToUser(uid, reminder) {
     webpush: { fcmOptions: { link: "/logbook" } },
   });
 
-  // Prune tokens the client no longer holds (uninstalled, permission
-  // revoked, etc.) so the device list doesn't grow unbounded.
   await Promise.all(
     resp.responses.map((r, i) => {
       const badToken =
@@ -155,44 +146,45 @@ async function sendToUser(uid, reminder) {
   );
 }
 
-// Runs every minute. Firestore reads scale with user count — fine at OJT-
-// batch scale (tens to low hundreds of trainees); if this ever needs to
-// scale to thousands, switch to a collection-group query filtered by an
-// indexed "hasActiveScheduleToday" field instead of scanning every user.
-exports.scheduledReminders = onSchedule(
-  { schedule: "every 1 minutes", timeZone: TIMEZONE },
-  async () => {
-    const now = new Date();
-    const nowMin = nowMinutes(now);
-    const today = todayStr(now);
-    const wd = weekday(now);
+export async function runReminderScan() {
+  const app = getAdminApp();
+  const db = app.firestore();
+  const messaging = app.messaging();
 
-    const usersSnap = await db.collection("users").get();
+  const now = new Date();
+  const nowMin = nowMinutes(now);
+  const today = todayStr(now);
+  const wd = weekday(now);
 
-    await Promise.all(
-      usersSnap.docs.map(async (userDoc) => {
-        const uid = userDoc.id;
-        const data = userDoc.data() || {};
+  const usersSnap = await db.collection("users").get();
+  let evaluated = 0;
+  let sent = 0;
 
-        const notifyStateRef = db.collection("users").doc(uid).collection("notifyState").doc(today);
-        const notifyStateSnap = await notifyStateRef.get();
-        const alreadySent = notifyStateSnap.exists ? notifyStateSnap.data() : {};
+  await Promise.all(
+    usersSnap.docs.map(async (userDoc) => {
+      evaluated++;
+      const uid = userDoc.id;
+      const data = userDoc.data() || {};
 
-        const reminder = pickReminder({
-          activeSession: data.activeSession || null,
-          clients: data.clients || [],
-          lastClientId: data.lastClientId || null,
-          nowMin,
-          wd,
-          alreadySent,
-        });
-        if (!reminder) return;
+      const notifyStateRef = db.collection("users").doc(uid).collection("notifyState").doc(today);
+      const notifyStateSnap = await notifyStateRef.get();
+      const alreadySent = notifyStateSnap.exists ? notifyStateSnap.data() : {};
 
-        await notifyStateRef.set({ [reminder.flagKey]: true }, { merge: true });
-        await sendToUser(uid, reminder);
-      })
-    );
+      const reminder = pickReminder({
+        activeSession: data.activeSession || null,
+        clients: data.clients || [],
+        lastClientId: data.lastClientId || null,
+        nowMin,
+        wd,
+        alreadySent,
+      });
+      if (!reminder) return;
 
-    return null;
-  }
-);
+      await notifyStateRef.set({ [reminder.flagKey]: true }, { merge: true });
+      await sendToUser(db, messaging, uid, reminder);
+      sent++;
+    })
+  );
+
+  return { evaluated, sent, at: now.toISOString() };
+}
