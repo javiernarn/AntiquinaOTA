@@ -346,13 +346,18 @@ export default function LogbookPage() {
     return map;
   }, [entries, nowDate]);
 
-  // Once an entry is fully finished (every segment's end time has passed),
-  // it moves out of the Logbook tab's ledger and into the Entry History
-  // tab instead — so the ledger only ever shows what's still Scheduled or
-  // In progress and doesn't grow into a long scroll of old, settled days.
+  // An entry stays in the Logbook tab's ledger for the rest of the calendar
+  // day it's dated on — even after its last segment's end time has passed
+  // and it's fully "complete" for hours purposes — so it's still easy to
+  // find and correct (edit/delete) right after clocking out. It only moves
+  // out to the Entry History tab once that date is no longer today, i.e.
+  // starting the following day. Deliberately date-based, not status-based:
+  // a same-day finished entry keeps status "complete" for hours/export
+  // purposes (see utils/liveProgress.js) but that no longer decides which
+  // tab it's shown in.
   const ledgerEntries = useMemo(
-    () => entries.filter((e) => entryProgress.get(e.id)?.status !== "complete"),
-    [entries, entryProgress]
+    () => entries.filter((e) => e.date >= todayStr(nowDate)),
+    [entries, nowDate]
   );
   const completedCount = entries.length - ledgerEntries.length;
 
@@ -1708,7 +1713,7 @@ export default function LogbookPage() {
 
             {entries.length > 0 && ledgerEntries.length === 0 && (
               <div className="empty-row">
-                No scheduled or in-progress entries right now — completed days have moved to the Entry History tab.
+                No entries for today (or later) right now — earlier days have moved to the Entry History tab.
               </div>
             )}
 

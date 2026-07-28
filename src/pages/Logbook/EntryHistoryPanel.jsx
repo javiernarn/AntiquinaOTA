@@ -11,16 +11,19 @@ import {
   formatMonthLabel,
 } from "../../utils/time";
 import { completionFor } from "../../utils/dutyStatus";
-import { liveEntryProgress } from "../../utils/liveProgress";
 
 const CATEGORY_LABEL = { regular: "Regular", evening: "Evening", overtime: "Overtime" };
 
-// A dedicated home for every entry that's actually finished — the Logbook
-// tab only keeps Scheduled / In progress rows now, so this is where
-// completed days land instead of piling up in one long scroll. Status is
-// re-derived live off the real-time progress engine (utils/liveProgress),
-// so an entry appears here the instant its last segment's end time is
-// reached — no manual refresh needed.
+// A dedicated home for every entry from an earlier calendar day — the
+// Logbook tab keeps today's (and any future-dated) rows, even once
+// they're fully clocked out, so a trainee can still catch and fix a
+// mistake right after finishing a shift. An entry only lands here once
+// its date is no longer today — e.g. an entry dated July 28 moves here
+// starting July 29, regardless of what time it was finished. By the time
+// an entry's date is in the past, its segments have necessarily all
+// elapsed, so its stored `hours` is already the final, settled value —
+// no need to re-derive live status here the way LogbookPage does for
+// today's still-moving entries.
 export default function EntryHistoryPanel({ entries, clients, now = new Date() }) {
   const [filterMode, setFilterMode] = useState("all"); // all | day | week | month
   const [filterDay, setFilterDay] = useState(() => todayStr(now));
@@ -31,9 +34,8 @@ export default function EntryHistoryPanel({ entries, clients, now = new Date() }
   const clientName = (id) => clients.find((c) => c.id === id)?.name || "Unassigned";
 
   const completed = useMemo(() => {
-    return entries
-      .map((e) => ({ ...e, progress: liveEntryProgress(e, now) }))
-      .filter((e) => e.progress.status === "complete");
+    const today = todayStr(now);
+    return entries.filter((e) => e.date < today);
   }, [entries, now]);
 
   const filtered = useMemo(() => {
