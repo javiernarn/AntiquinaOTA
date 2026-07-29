@@ -5,19 +5,39 @@
 // Cloud Functions + Cloud Scheduler do. This file gets invoked by
 // api/send-reminders.js, which an outside free cron service calls on a
 // schedule (see the setup steps in the project README / chat instructions).
+//
+// IMPORTANT: this only ever reads `clients` + `lastClientId` from Firestore
+// (the two fields cloudSync.js's syncClients() actually writes). There is
+// no server-side concept of a "live session" — the app never mirrors an
+// activeSession/phase to Firestore, so nothing here depends on one. Every
+// reminder below is derived purely from the trainee's current host
+// client's own schedule (days / timeIn / timeOut), the same source the
+// pre-shift reminder already used. That's what lets a checkpoint like
+// "Lunch out" or "Afternoon out" re-fire correctly every scheduled day
+// without any extra state from the app itself.
 
 import admin from "firebase-admin";
 
 const TIMEZONE = "Asia/Manila";
 
-const LUNCH_OUT_AT = 12 * 60;
-const LUNCH_RESUME_AT = 13 * 60;
-const PM_END_AT = 17 * 60;
-const EV_END_AT = 20 * 60;
+const LUNCH_OUT_AT = 12 * 60; // 12:00 PM
+const LUNCH_RESUME_AT = 13 * 60; // 1:00 PM
+const AFTERNOON_END_AT = 17 * 60; // 5:00 PM — boundary between "Afternoon" and "Evening" labels
 
-const PRESHIFT_BEFORE_MIN = 10;
-const LUNCH_REMINDER_BEFORE_MIN = 10;
-const SHIFT_END_BEFORE_MIN = 10;
+// How many minutes ahead of each checkpoint the reminder should go out.
+const PRESHIFT_BEFORE_MIN = 10; // day start ("Morning/Afternoon/Evening in")
+const LUNCH_OUT_BEFORE_MIN = 10; // before lunch break starts (12:00 PM)
+const LUNCH_IN_BEFORE_MIN = 5; // before lunch break ends / afternoon resumes (1:00 PM)
+const DAY_END_BEFORE_MIN = 10; // before the client's own timeOut
+
+// How late (in minutes, past the "before" threshold) a checkpoint is still
+// allowed to fire if the cron service ran a little late or its interval
+// drifted. Without this, a 5-minute "before" window checked by a cron that
+// ticks every 5 minutes (like cron-job.org's free tier) can slip past the
+// window entirely and the reminder never goes out that day. This only ever
+// widens the window backwards in time (still stops the moment the
+// checkpoint itself has passed), so reminders never fire late.
+const CRON_DRIFT_GRACE_MIN = 4;
 
 function nowMinutes(date) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -57,60 +77,112 @@ function formatTime12(hhmm) {
   return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
-function pickReminder({ activeSession, clients, lastClientId, nowMin, wd, alreadySent }) {
-  if (!activeSession) {
-    const client = (clients || []).find((c) => c.id === lastClientId);
-    if (!client || !Array.isArray(client.days) || !client.days.includes(wd)) return null;
-    const startMin = toMinutes(client.timeIn);
-    if (startMin === null || alreadySent.preShift) return null;
-    if (nowMin >= startMin - PRESHIFT_BEFORE_MIN && nowMin < startMin) {
-      const left = startMin - nowMin;
-      return {
-        flagKey: "preShift",
-        title: "Your OJT shift starts soon",
-        body: `${client.name} starts at ${formatTime12(client.timeIn)} — about ${left} minute${left === 1 ? "" : "s"} left.`,
-      };
-    }
-    return null;
+function minsLeftLabel(left) {
+  return `${left} minute${left === 1 ? "" : "s"}`;
+}
+
+// "Morning in" / "Lunch in" / "Afternoon in" / "Evening in" (or "... out")
+// for a given clock-minute value, matching the exact field labels used in
+// the Duty Log's own manual-entry form (see LogbookPage.jsx: "Morning in",
+// "Lunch out", "Lunch in", "Afternoon out").
+function segmentLabel(mins, isStart) {
+  // Start-of-segment and end-of-segment boundaries aren't symmetric: a
+  // shift that STARTS at exactly 5:00 PM is beginning an Evening shift,
+  // but a shift that ENDS at exactly 5:00 PM just finished an Afternoon
+  // one (5:00 PM is the last minute of "Afternoon", not the first minute
+  // of "Evening" from the end side).
+  if (isStart) {
+    if (mins < LUNCH_OUT_AT) return "Morning in";
+    if (mins < LUNCH_RESUME_AT) return "Lunch in";
+    if (mins < AFTERNOON_END_AT) return "Afternoon in";
+    return "Evening in";
+  }
+  if (mins <= LUNCH_OUT_AT) return "Morning out";
+  if (mins <= LUNCH_RESUME_AT) return "Lunch out";
+  if (mins <= AFTERNOON_END_AT) return "Afternoon out";
+  return "Evening out";
+}
+
+// Is `nowMin` inside the pre-checkpoint window, allowing a little grace for
+// cron drift, but never past the checkpoint itself?
+function inWindow(nowMin, atMin, beforeMin) {
+  return nowMin < atMin && nowMin >= atMin - beforeMin - CRON_DRIFT_GRACE_MIN;
+}
+
+// Builds today's checkpoint list for one host client, purely from that
+// client's own recurring schedule — no live session state involved. A
+// client whose hours don't cross the fixed 12:00–1:00 PM lunch break (e.g.
+// a custom 1:00 PM–8:00 PM host) simply skips the two lunch checkpoints,
+// matching how clientCoverage()/dailyHoursFor() in src/utils/schedule.js
+// already reason about "does this client's day span lunch".
+function checkpointsForClient(client) {
+  const inMin = toMinutes(client.timeIn);
+  const outMin = toMinutes(client.timeOut);
+  if (inMin === null || outMin === null || outMin <= inMin) return [];
+
+  const spansLunch = inMin < LUNCH_OUT_AT && outMin > LUNCH_RESUME_AT;
+  const checkpoints = [];
+
+  const startLabel = segmentLabel(inMin, true);
+  checkpoints.push({
+    flagKey: "dayStart",
+    atMin: inMin,
+    beforeMin: PRESHIFT_BEFORE_MIN,
+    build: (left) => ({
+      title: `Your ${startLabel} will start soon`,
+      body: `${client.name} — ${startLabel} at ${formatTime12(client.timeIn)}, in about ${minsLeftLabel(left)}.`,
+    }),
+  });
+
+  if (spansLunch) {
+    checkpoints.push({
+      flagKey: "lunchOut",
+      atMin: LUNCH_OUT_AT,
+      beforeMin: LUNCH_OUT_BEFORE_MIN,
+      build: (left) => ({
+        title: "Your Lunch out will start soon",
+        body: `Morning is wrapping up — Lunch out in about ${minsLeftLabel(left)} (12:00 PM).`,
+      }),
+    });
+    checkpoints.push({
+      flagKey: "lunchIn",
+      atMin: LUNCH_RESUME_AT,
+      beforeMin: LUNCH_IN_BEFORE_MIN,
+      build: (left) => ({
+        title: "Your Lunch in will start soon",
+        body: `Lunch break is ending — Lunch in / Afternoon resumes in about ${minsLeftLabel(left)} (1:00 PM).`,
+      }),
+    });
   }
 
-  if (activeSession.phase === "lunch" && !alreadySent.lunchReminder) {
-    if (nowMin >= LUNCH_RESUME_AT - LUNCH_REMINDER_BEFORE_MIN && nowMin < LUNCH_RESUME_AT) {
-      const left = LUNCH_RESUME_AT - nowMin;
-      return {
-        flagKey: "lunchReminder",
-        title: "Lunch ending soon",
-        body: `Your Afternoon time-in starts in ${left} minute${left === 1 ? "" : "s"} (1:00 PM).`,
-      };
-    }
-    return null;
-  }
+  const endLabel = segmentLabel(outMin, false);
+  checkpoints.push({
+    flagKey: "dayEnd",
+    atMin: outMin,
+    beforeMin: DAY_END_BEFORE_MIN,
+    build: (left) => ({
+      title: `Your ${endLabel} will end soon`,
+      body: `${client.name} ends at ${formatTime12(client.timeOut)} — about ${minsLeftLabel(left)} left. Don't forget to clock out.`,
+    }),
+  });
 
-  if (activeSession.phase === "pm" && !alreadySent.shiftEnd) {
-    const client = (clients || []).find((c) => c.id === activeSession.client);
-    const dayEndMin = client ? toMinutes(client.timeOut) ?? PM_END_AT : PM_END_AT;
-    if (nowMin >= dayEndMin - SHIFT_END_BEFORE_MIN && nowMin < dayEndMin) {
-      return {
-        flagKey: "shiftEnd",
-        title: "Your shift is ending soon",
-        body: `Don't forget to clock out — ends at ${formatTime12(client ? client.timeOut : "17:00")}.`,
-      };
-    }
-    return null;
-  }
+  return checkpoints;
+}
 
-  if (activeSession.phase === "ev" && !alreadySent.shiftEndEv) {
-    if (nowMin >= EV_END_AT - SHIFT_END_BEFORE_MIN && nowMin < EV_END_AT) {
-      return {
-        flagKey: "shiftEndEv",
-        title: "Your evening shift is ending soon",
-        body: "Don't forget to clock out — ends at 8:00 PM.",
-      };
-    }
-    return null;
-  }
+// Returns every reminder due right now for this trainee (normally at most
+// one — checkpoints are hours apart — but the shape supports more).
+function pickReminders({ clients, lastClientId, nowMin, wd, alreadySent }) {
+  const client = (clients || []).find((c) => c.id === lastClientId);
+  if (!client || !Array.isArray(client.days) || !client.days.includes(wd)) return [];
 
-  return null;
+  const due = [];
+  for (const cp of checkpointsForClient(client)) {
+    if (alreadySent[cp.flagKey]) continue;
+    if (!inWindow(nowMin, cp.atMin, cp.beforeMin)) continue;
+    const left = Math.max(1, cp.atMin - nowMin);
+    due.push({ flagKey: cp.flagKey, ...cp.build(left) });
+  }
+  return due;
 }
 
 function getAdminApp() {
@@ -169,19 +241,20 @@ export async function runReminderScan() {
       const notifyStateSnap = await notifyStateRef.get();
       const alreadySent = notifyStateSnap.exists ? notifyStateSnap.data() : {};
 
-      const reminder = pickReminder({
-        activeSession: data.activeSession || null,
+      const reminders = pickReminders({
         clients: data.clients || [],
         lastClientId: data.lastClientId || null,
         nowMin,
         wd,
         alreadySent,
       });
-      if (!reminder) return;
+      if (!reminders.length) return;
 
-      await notifyStateRef.set({ [reminder.flagKey]: true }, { merge: true });
-      await sendToUser(db, messaging, uid, reminder);
-      sent++;
+      for (const reminder of reminders) {
+        await notifyStateRef.set({ [reminder.flagKey]: true }, { merge: true });
+        await sendToUser(db, messaging, uid, reminder);
+        sent++;
+      }
     })
   );
 
