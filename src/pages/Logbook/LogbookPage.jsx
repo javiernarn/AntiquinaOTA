@@ -768,6 +768,12 @@ export default function LogbookPage() {
             : c
         )
       );
+      // The client someone just edited is the one whose schedule should
+      // drive their reminders — without this, lastClientId was never set
+      // anywhere in the app, so the cloud function could never match a
+      // client and pre-shift/lunch/end-of-day reminders never fired for
+      // anyone, no matter how the host client was configured.
+      setLastClientId(editingClientId);
       notify({ type: "success", title: "Host client updated", message: `"${name}" schedule was updated.` });
       resetClientForm();
       return;
@@ -776,10 +782,11 @@ export default function LogbookPage() {
       setNewClientName("");
       return;
     }
-    setClients((prev) => [
-      ...prev,
-      { id: uid(), name, type: newClientType, days: newClientDays, timeIn: newClientTimeIn, timeOut: newClientTimeOut },
-    ]);
+    const newClient = { id: uid(), name, type: newClientType, days: newClientDays, timeIn: newClientTimeIn, timeOut: newClientTimeOut };
+    setClients((prev) => [...prev, newClient]);
+    // A newly added host client becomes the trainee's current one for
+    // reminder purposes (see note above).
+    setLastClientId(newClient.id);
     resetClientForm();
   }
 
@@ -802,6 +809,7 @@ export default function LogbookPage() {
   function removeClient(id) {
     setClients((prev) => prev.filter((c) => c.id !== id));
     if (id === editingClientId) resetClientForm();
+    if (id === lastClientId) setLastClientId(null);
     notify({ type: "info", title: "Host client removed", message: "The host client was removed from your list." });
   }
 
