@@ -142,7 +142,7 @@ export default function ReportsPanel({ entries, clients, now = new Date(), block
     return (
       <div className="reports-empty">
         {entries.length === 0
-          ? "No entries yet. Clock in or add a day in the Logbook tab to see your reports."
+          ? "No entries yet. Add a day in the Logbook tab to see your reports."
           : "Your logged shift hasn't started yet against the clock — this report will populate in real time once it does."}
       </div>
     );

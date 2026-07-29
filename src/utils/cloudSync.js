@@ -5,7 +5,6 @@
 //   signInToCloud(idToken)   — once, right after Google sign-in succeeds
 //   registerDeviceForPush()  — once per device, after sign-in (asks for
 //                               Notification permission)
-//   syncActiveSession(s)     — whenever LogbookPage's activeSession changes
 //   syncClients(list, lastId)— whenever the host-client list or the
 //                               "most recent client" changes
 //
@@ -149,26 +148,10 @@ export async function registerDeviceForPush() {
 
 // --- Session / schedule mirroring ---------------------------------------
 // The scheduler (Cloud Functions) can't read the browser's local
-// storage, so the small slice of state it actually needs — the running
-// clock-in session, the host-client list, and which client the trainee
-// last clocked in under — gets mirrored to Firestore whenever it changes.
-// Everything else (full entry history, PDFs, etc.) stays local-only.
-export async function syncActiveSession(session) {
-  if (!firebaseEnabled) return;
-  const uid = uidOrNull();
-  if (!uid) return;
-  const ref = doc(db, "users", uid);
-  try {
-    if (!session) {
-      await setDoc(ref, { activeSession: null }, { merge: true });
-    } else {
-      await setDoc(ref, { activeSession: session }, { merge: true });
-    }
-  } catch (e) {
-    console.warn("Session sync failed (push reminders may lag).", e);
-  }
-}
-
+// storage, so the small slice of state it actually needs — the
+// host-client list, and which client the trainee most recently logged
+// hours under — gets mirrored to Firestore whenever it changes. Everything
+// else (full entry history, PDFs, etc.) stays local-only.
 export async function syncClients(clients, lastClientId) {
   if (!firebaseEnabled) return;
   const uid = uidOrNull();

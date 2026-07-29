@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Trash2, FileDown, LogOut, Play, Square, X, Users, Sun, Sunset, Moon, Pencil, XCircle } from "lucide-react";
+import { Plus, Trash2, FileDown, LogOut, X, Users, Sun, Sunset, Moon, Pencil, XCircle } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotifications } from "../../context/NotificationContext";
 import { useLiveClock } from "../../hooks/useLiveClock";
@@ -11,8 +11,8 @@ import TimeInput12 from "../../components/TimeInput12";
 import ReportsPanel from "./ReportsPanel";
 import EntryHistoryPanel from "./EntryHistoryPanel";
 import Footer from "../../components/Footer";
-import { getUserStorage, setUserStorage, removeUserStorage, isStorageAvailable } from "../../utils/storage";
-import { syncActiveSession, syncClients } from "../../utils/cloudSync";
+import { getUserStorage, setUserStorage, isStorageAvailable } from "../../utils/storage";
+import { syncClients } from "../../utils/cloudSync";
 import logo from "../../assets/images/site-logo.png";
 import { LOGO_BASE64 } from "../../assets/logoBase64";
 import {
@@ -24,9 +24,6 @@ import {
   todayStr,
   nowClock,
   uid,
-  elapsedMsSince,
-  formatDuration,
-  msToHours,
   rangesOverlap,
   startOfWeek,
   formatWeekRange,
@@ -41,7 +38,6 @@ import { COMPANY_TYPES, WEEKDAYS, normalizeClient, isWorkDay, dailyHoursFor, sch
 import "./logbook.css";
 
 const STORAGE_KEY = "logbook-v2";
-const SESSION_KEY = "active-session-v1";
 const MILESTONES_KEY = "milestones-v1";
 const REMINDER_KEY = "shift-reminder-v1";
 const ONBOARDING_KEY = "onboarding-seen-v1";
@@ -100,22 +96,10 @@ function coverageOptionsFor(category, restrictMorning, clientCov) {
 
 const EVENING_STARTS_AT = 17 * 60; // 5:00 PM, in minutes — when "it's already evening"
 
-// Standard OJT shift boundaries, in minutes-since-midnight, Philippine time.
-// These drive the automatic clock-in flow: lunch out at 12:00 PM (not
-// counted), auto-resume at 1:00 PM, and an automatic clock-out once a
-// session reaches the standard end of its segment (5:00 PM for a Morning/
-// Afternoon shift, 8:00 PM for an Evening shift).
+// Standard OJT lunch boundary, in minutes-since-midnight, Philippine time —
+// used by the manual entry form to decide when "Morning"/"Whole day"
+// coverage for today is no longer a sensible option to offer.
 const LUNCH_OUT_AT = 12 * 60; // 12:00 PM
-const LUNCH_RESUME_AT = 13 * 60; // 1:00 PM
-const PM_END_AT = 17 * 60; // 5:00 PM
-const EV_END_AT = 20 * 60; // 8:00 PM
-
-// How many minutes before 1:00 PM the "lunch is almost over" heads-up fires
-// — a courtesy nudge so a trainee mid-break knows their Afternoon shift is
-// about to resume, on top of the resume notice that fires exactly at 1:00 PM.
-const LUNCH_REMINDER_BEFORE_MIN = 10;
-
-const SEGMENT_LABEL = { am: "Morning", pm: "Afternoon", ev: "Evening" };
 
 function initialsOf(name) {
   if (!name) return "OJ";
@@ -206,29 +190,12 @@ export default function LogbookPage() {
   const [confirmDialog, setConfirmDialog] = useState(null); // { kind: "entry" | "client", id }
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  const [activeSession, setActiveSession] = useState(() => getUserStorage(SESSION_KEY, userId));
-  const [sessionClient, setSessionClient] = useState("");
-  const [sessionCategory, setSessionCategory] = useState("regular");
-  const [sessionNote, setSessionNote] = useState("");
-
-  // Mirror the live clock-in state to Firestore so the server-side
-  // scheduler (Cloud Functions) can send the exact same pre-shift /
-  // lunch / end-of-day reminders as real push notifications — the ones
-  // below via notify({system:true}) only reach this browser tab while
-  // it's open. Both fire off the same state, they just reach different
-  // places. No-ops entirely if Firebase isn't configured.
-  useEffect(() => {
-    if (!loaded) return;
-    syncActiveSession(activeSession);
-  }, [activeSession, loaded]);
-
   useEffect(() => {
     if (!loaded) return;
     syncClients(clients, lastClientId);
   }, [clients, lastClientId, loaded]);
 
   const milestonesRef = useRef(new Set(getUserStorage(MILESTONES_KEY, userId) || []));
-  const longShiftRef = useRef(new Set());
   // Date string (YYYY-MM-DD) the pre-shift reminder already fired for —
   // prevents it repeating every tick throughout the 10-minute window, and
   // resets naturally the next calendar day.
@@ -339,7 +306,7 @@ export default function LogbookPage() {
   // clock right now, rather than trusting the entry's stored `hours` the
   // instant it's added. A manually-added "8:00 AM–5:00 PM" entry for today
   // logged at 7:59 AM contributes 0 hours until 8:00 AM actually arrives,
-  // then ticks up live as the day goes on — same as a live clocked session.
+  // then ticks up live as the day goes on.
   const entryProgress = useMemo(() => {
     const map = new Map();
     for (const e of entries) map.set(e.id, liveEntryProgress(e, nowDate));
@@ -349,7 +316,7 @@ export default function LogbookPage() {
   // An entry stays in the Logbook tab's ledger for the rest of the calendar
   // day it's dated on — even after its last segment's end time has passed
   // and it's fully "complete" for hours purposes — so it's still easy to
-  // find and correct (edit/delete) right after clocking out. It only moves
+  // find and correct (edit/delete) right after it's logged. It only moves
   // out to the Entry History tab once that date is no longer today, i.e.
   // starting the following day. Deliberately date-based, not status-based:
   // a same-day finished entry keeps status "complete" for hours/export
@@ -369,17 +336,13 @@ export default function LogbookPage() {
     () => [...entryProgress.values()].some((p) => p.status === "in-progress"),
     [entryProgress]
   );
-  // A currently clocked-in session (Clock in button) is the same kind of
-  // "still progressing" state even though it isn't in `entries` yet.
-  const blockingExport = !!activeSession || anyEntryInProgress;
+  const blockingExport = anyEntryInProgress;
 
   const loggedHours = useMemo(
     () => Math.round([...entryProgress.values()].reduce((sum, p) => sum + p.liveHours, 0) * 100) / 100,
     [entryProgress]
   );
-  const liveElapsedMs = activeSession ? elapsedMsSince(activeSession.segStartedAt) : 0;
-  const liveElapsedHours = msToHours(liveElapsedMs);
-  const totalHours = loggedHours + liveElapsedHours;
+  const totalHours = loggedHours;
   const remaining = Math.max(targetHours - totalHours, 0);
   const percent = targetHours > 0 ? Math.min((totalHours / targetHours) * 100, 100) : 0;
   const complete = percent >= 100;
@@ -442,13 +405,12 @@ export default function LogbookPage() {
   }, [percent, loaded]);
 
   // Pre-shift reminder — nudges the trainee about 20 minutes before their
-  // scheduled start time so they remember to open the app and clock in.
-  // Based on the host client they most recently clocked in under (their
+  // scheduled start time so they remember their shift is about to begin.
+  // Based on the host client they most recently logged hours under (their
   // Public/Private/Custom schedule set on the Host clients form), and only
   // on that client's actual working days — a public-office assignment
-  // (Mon–Thu) won't nag on a Friday, for instance. Skipped entirely once
-  // they're already clocked in, or once they've already logged hours for
-  // that client today.
+  // (Mon–Thu) won't nag on a Friday, for instance. Skipped once they've
+  // already logged hours for that client today.
   //
   // This only fires while this tab is open and in the foreground — it's a
   // same-tab fallback. The real "reaches the phone even with the app
@@ -457,7 +419,7 @@ export default function LogbookPage() {
   // before check for every host client on every trainee's account, not
   // just the most recent one.
   useEffect(() => {
-    if (!loaded || activeSession) return;
+    if (!loaded) return;
     const client = clients.find((c) => c.id === lastClientId);
     if (!client) return;
     const norm = normalizeClient(client);
@@ -476,264 +438,13 @@ export default function LogbookPage() {
       notify({
         type: "info",
         title: "Your OJT shift starts soon",
-        message: `${client.name} starts at ${formatTime12(norm.timeIn)} — you can clock in in about ${startMin - nowMin} minute${startMin - nowMin === 1 ? "" : "s"}.`,
+        message: `${client.name} starts at ${formatTime12(norm.timeIn)} — about ${startMin - nowMin} minute${startMin - nowMin === 1 ? "" : "s"} from now.`,
         system: true,
         tag: `shift-reminder-${today}`,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveNow, loaded, activeSession, clients, entries, lastClientId]);
-
-  // Long-shift watch — ticks live while a session is actually running (not
-  // while paused for lunch, since elapsedMsSince(null) returns 0).
-  useEffect(() => {
-    if (!activeSession || activeSession.phase === "lunch") {
-      longShiftRef.current = new Set();
-      return;
-    }
-    const hrs = msToHours(elapsedMsSince(activeSession.segStartedAt));
-    [4, 8, 12].forEach((h) => {
-      if (hrs >= h && !longShiftRef.current.has(h)) {
-        longShiftRef.current.add(h);
-        notify({
-          type: "warning",
-          title: `Shift running ${h}h+`,
-          message: "Still on the clock — remember to clock out when you wrap up.",
-          system: true,
-          tag: `long-shift-${h}`,
-        });
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveNow, activeSession]);
-
-  // Builds and saves one Morning/Afternoon/Evening segment straight to the
-  // logbook (same shape as a manually-added day), the moment that segment
-  // actually finishes — either because the standard boundary was hit
-  // automatically, or the trainee clocked out early. This is what makes the
-  // reports/PDF reflect real, already-worked hours in real time instead of
-  // waiting for a "whole day" to be assembled first.
-  function saveSegment(session, segKey, inTime, outTime) {
-    const hrs = hoursBetween(inTime, outTime);
-    if (hrs <= 0) return null;
-    const entry = {
-      id: uid(),
-      date: session.date,
-      amIn: segKey === "am" ? inTime : "",
-      amOut: segKey === "am" ? outTime : "",
-      pmIn: segKey === "pm" ? inTime : "",
-      pmOut: segKey === "pm" ? outTime : "",
-      evIn: segKey === "ev" ? inTime : "",
-      evOut: segKey === "ev" ? outTime : "",
-      client: session.client,
-      category: session.category,
-      hours: hrs,
-      task: sessionNote.trim(),
-    };
-    setEntries((prev) => [...prev, entry].sort((a, b) => a.date.localeCompare(b.date)));
-    return entry;
-  }
-
-  // Clocking in starts whichever segment the current Philippine time falls
-  // into — Morning (before 12:00 PM), Afternoon (12:00 PM until the host
-  // client's own end-of-day time), or Evening (after that). Regular/Evening
-  // shifts are then auto-managed: the app itself will clock out for lunch
-  // at noon, resume at 1:00 PM, and clock out automatically once the
-  // client's scheduled end time is reached — 5:00 PM for a public-office
-  // assignment, 6:00 PM for a private-company one, by default (each host
-  // client's own hours, set on the Host clients form, always win).
-  // Overtime is left manual/open-ended since it's meant to run past the
-  // standard hours — the trainee clocks it out themselves.
-  //
-  // When a Morning segment starts with a host client assigned, the time-in
-  // that gets recorded is that client's own scheduled start (e.g. 7:00 AM
-  // for a Mon–Thu, 7:00 AM–6:00 PM host) rather than the exact second the
-  // Clock in button was tapped — matching a standard DTR, where the log
-  // reflects the shift's official hours, not the trainee's literal
-  // keystroke. The Afternoon end already works the same way: it's the auto
-  // clock-out at the client's scheduled end time that saves the entry, so
-  // "afternoon out" always lands on that client's own hours too.
-  function clockIn() {
-    if (activeSession) return;
-    const nowC = nowClock();
-    const nowMin = toMinutes(nowC) ?? 0;
-    const client = clients.find((c) => c.id === sessionClient);
-    const norm = client ? normalizeClient(client) : null;
-    const dayEndAt = norm ? toMinutes(norm.timeOut) ?? PM_END_AT : PM_END_AT;
-    const phase = nowMin >= dayEndAt ? "ev" : nowMin >= LUNCH_OUT_AT ? "pm" : "am";
-    const segStart = phase === "am" && norm ? norm.timeIn : nowC;
-    const session = {
-      client: sessionClient || null,
-      category: sessionCategory,
-      date: todayStr(),
-      phase,
-      segStart,
-      segStartedAt: new Date().toISOString(),
-      autoManage: sessionCategory !== "overtime",
-      amSaved: false,
-    };
-    setActiveSession(session);
-    setUserStorage(SESSION_KEY, userId, session);
-    if (sessionClient) setLastClientId(sessionClient);
-    notify({
-      type: "info",
-      title: "Clocked in",
-      message:
-        phase === "am" && norm
-          ? `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}, per ${client.name}'s schedule.`
-          : `${categoryLabel(session.category)} shift started at ${formatTime12(session.segStart)}.`,
-    });
-  }
-
-  // Resolves a session's end-of-day boundary from its assigned host
-  // client's own schedule (Public/Private/Custom, set on the Host clients
-  // form) — falling back to the app's original fixed 5:00 PM for sessions
-  // with no client assigned, so behavior is unchanged for anyone who
-  // hasn't set up a host client yet.
-  function dayEndTimeFor(clientId) {
-    const client = clients.find((c) => c.id === clientId);
-    return client ? normalizeClient(client).timeOut : "17:00";
-  }
-  function dayEndFor(clientId) {
-    return toMinutes(dayEndTimeFor(clientId)) ?? PM_END_AT;
-  }
-
-  // Automatic lunch-out → resume → end-of-day flow. Runs every tick the
-  // live clock updates, compared against Philippine time. Each branch
-  // changes activeSession.phase, which is itself a guard — once a branch
-  // fires, its own condition is no longer true, so it can't double-fire.
-  useEffect(() => {
-    if (!activeSession || !activeSession.autoManage) return;
-    const nowMin = toMinutes(nowClock(new Date(liveNow)));
-    if (nowMin === null) return;
-
-    if (activeSession.phase === "am" && nowMin >= LUNCH_OUT_AT) {
-      saveSegment(activeSession, "am", activeSession.segStart, "12:00");
-      const next = { ...activeSession, phase: "lunch", segStart: "", segStartedAt: null, amSaved: true, lunchReminderSent: false };
-      setActiveSession(next);
-      setUserStorage(SESSION_KEY, userId, next);
-      notify({
-        type: "info",
-        title: "Lunch break — clocked out for lunch",
-        message: `Your ${categoryLabel(activeSession.category)} Morning hours (${formatTime12(activeSession.segStart)}–12:00 PM) were saved to your reports. Lunch hour (12:01 PM–12:59 PM) isn't counted toward your OJT hours — you'll resume at 1:00 PM.`,
-        system: true,
-        tag: "auto-lunch-out",
-      });
-      return;
-    }
-
-    // Heads-up a few minutes before lunch ends, so the reminder isn't a
-    // total surprise at exactly 1:00 PM. Fires once per lunch break
-    // (lunchReminderSent guards it), then the resume branch below still
-    // fires separately once 1:00 PM actually arrives.
-    if (
-      activeSession.phase === "lunch" &&
-      !activeSession.lunchReminderSent &&
-      nowMin >= LUNCH_RESUME_AT - LUNCH_REMINDER_BEFORE_MIN &&
-      nowMin < LUNCH_RESUME_AT
-    ) {
-      const minutesLeft = LUNCH_RESUME_AT - nowMin;
-      const next = { ...activeSession, lunchReminderSent: true };
-      setActiveSession(next);
-      setUserStorage(SESSION_KEY, userId, next);
-      notify({
-        type: "info",
-        title: "Lunch ending soon",
-        message: `Your ${categoryLabel(activeSession.category)} Afternoon time-in starts in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"} (1:00 PM).`,
-        system: true,
-        tag: "auto-lunch-reminder",
-      });
-      return;
-    }
-
-    if (activeSession.phase === "lunch" && nowMin >= LUNCH_RESUME_AT) {
-      const next = { ...activeSession, phase: "pm", segStart: "13:00", segStartedAt: new Date().toISOString() };
-      setActiveSession(next);
-      setUserStorage(SESSION_KEY, userId, next);
-      notify({
-        type: "info",
-        title: "OJT clock-in resumed",
-        message: `Lunch is over — your ${categoryLabel(activeSession.category)} Afternoon shift has resumed at 1:00 PM.`,
-        system: true,
-        tag: "auto-lunch-resume",
-      });
-      return;
-    }
-
-    if (activeSession.phase === "pm" && nowMin >= dayEndFor(activeSession.client)) {
-      const endTime = dayEndTimeFor(activeSession.client);
-      saveSegment(activeSession, "pm", activeSession.segStart, endTime);
-      setActiveSession(null);
-      removeUserStorage(SESSION_KEY, userId);
-      setSessionNote("");
-      notify({
-        type: "success",
-        title: "You've met today's required hours",
-        message: activeSession.amSaved
-          ? `Whole-day ${categoryLabel(activeSession.category)} shift complete (Morning + Afternoon) — today's hours have been saved to your reports.`
-          : `${categoryLabel(activeSession.category)} Afternoon shift complete — today's hours have been saved to your reports.`,
-        system: true,
-        tag: "auto-day-complete",
-      });
-      return;
-    }
-
-    if (activeSession.phase === "ev" && nowMin >= EV_END_AT) {
-      saveSegment(activeSession, "ev", activeSession.segStart, "20:00");
-      setActiveSession(null);
-      removeUserStorage(SESSION_KEY, userId);
-      setSessionNote("");
-      notify({
-        type: "success",
-        title: "You've met today's required hours",
-        message: "Evening shift complete — today's hours have been saved to your reports.",
-        system: true,
-        tag: "auto-day-complete",
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveNow, activeSession]);
-
-  function clockOut() {
-    if (!activeSession) return;
-
-    // Ending the day during the lunch break: the Morning segment was
-    // already saved automatically, so there's nothing left to log.
-    if (activeSession.phase === "lunch") {
-      setActiveSession(null);
-      removeUserStorage(SESSION_KEY, userId);
-      setSessionNote("");
-      notify({
-        type: "info",
-        title: "Shift ended at lunch",
-        message: "Your Morning hours were already saved to your reports. No Afternoon hours were logged today.",
-      });
-      return;
-    }
-
-    const clockOutTime = nowClock();
-    const hrs = hoursBetween(activeSession.segStart, clockOutTime);
-
-    if (hrs < 0.01) {
-      setActiveSession(null);
-      removeUserStorage(SESSION_KEY, userId);
-      setSessionNote("");
-      return;
-    }
-
-    const entry = saveSegment(activeSession, activeSession.phase, activeSession.segStart, clockOutTime);
-    setActiveSession(null);
-    removeUserStorage(SESSION_KEY, userId);
-    setSessionNote("");
-
-    notify({
-      type: "success",
-      title: "Clocked out",
-      message: `Logged ${formatHours(entry?.hours ?? hrs)} for ${formatDateLong(activeSession.date)}.`,
-      system: true,
-      tag: "clock-out",
-    });
-  }
+  }, [liveNow, loaded, clients, entries, lastClientId]);
 
   // If the Add-day form is left open across the 12:00 PM boundary while set
   // to Morning or Whole day for today, switch it to Afternoon the moment
@@ -793,11 +504,10 @@ export default function LogbookPage() {
 
   // Selecting (or changing) the host client re-derives this draft's Morning
   // time-in and Afternoon time-out from that client's own schedule — the
-  // same 7:00 AM–6:00 PM (or whatever's set on the Host clients form) that
-  // the live Clock in/out flow already follows. Only touches whichever of
-  // those two fields is actually part of the current shift coverage (a
-  // field left blank because that segment isn't covered stays blank); the
-  // lunch break stays fixed at 12:00–1:00 PM either way.
+  // same 7:00 AM–6:00 PM (or whatever's set on the Host clients form). Only
+  // touches whichever of those two fields is actually part of the current
+  // shift coverage (a field left blank because that segment isn't covered
+  // stays blank); the lunch break stays fixed at 12:00–1:00 PM either way.
   function handleClientChange(clientId) {
     const client = clientId ? clients.find((c) => c.id === clientId) : null;
     const norm = client ? normalizeClient(client) : null;
@@ -1108,15 +818,13 @@ export default function LogbookPage() {
   async function exportPDF() {
     // Real-time gate: a report is a record of finished duty hours, so it
     // can't be generated while any entry is still mid-shift (started but
-    // its scheduled end hasn't been reached yet) or while a live session is
-    // actively clocked in. This mirrors the same rule the Reports tab uses.
+    // its scheduled end hasn't been reached yet). This mirrors the same
+    // rule the Reports tab uses.
     if (blockingExport) {
       notify({
         type: "warning",
         title: "Still tracking today's shift",
-        message: activeSession
-          ? "You're currently clocked in. Clock out first, then export or view your report."
-          : "Today's logged hours are still in progress against the clock. Wait until the scheduled shift finishes, then export or view your report.",
+        message: "Today's logged hours are still in progress against the clock. Wait until the scheduled shift finishes, then export or view your report.",
       });
       return;
     }
@@ -1467,7 +1175,7 @@ export default function LogbookPage() {
 
         <section className="duty-hero">
           <div className="hero-ring">
-            <ProgressRing percent={percent} complete={complete} live={!!activeSession}>
+            <ProgressRing percent={percent} complete={complete}>
               <div className="ring-hours">{formatHours(totalHours)}</div>
               <div className="ring-target">of {targetHours}h target</div>
               <div className="ring-percent">{Math.round(percent)}%</div>
@@ -1476,82 +1184,6 @@ export default function LogbookPage() {
               <span className="remaining-chip">{formatHours(remaining)} still required</span>
               {overtimeHours > 0 && <span className="ot-chip">{formatHours(overtimeHours)} overtime</span>}
             </div>
-          </div>
-
-          <div className="hero-clock">
-            {!activeSession ? (
-              <>
-                <div className="clock-label">Start a shift</div>
-                <div className="clock-controls">
-                  <select value={sessionClient} onChange={(e) => setSessionClient(e.target.value)}>
-                    <option value="">Unassigned client</option>
-                    {clients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <select value={sessionCategory} onChange={(e) => setSessionCategory(e.target.value)}>
-                    {CATEGORIES.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="clock-in-btn" onClick={clockIn}>
-                    <Play size={16} /> Clock in
-                  </button>
-                </div>
-                <p className="clock-hint">Real-time tracking starts the moment you clock in.</p>
-              </>
-            ) : activeSession.phase === "lunch" ? (
-              <>
-                <div className="clock-label lunch">
-                  <span className="live-dot lunch-dot" /> On lunch break · not counted toward your hours
-                </div>
-                <div className="clock-digits clock-digits--lunch">Resumes 1:00 PM</div>
-                <div className="clock-controls">
-                  <button className="clock-out-btn" onClick={clockOut}>
-                    <Square size={14} /> End day now
-                  </button>
-                </div>
-                <p className="clock-hint">
-                  Your Morning hours were already saved to your reports. You'll get a heads-up notification{" "}
-                  {LUNCH_REMINDER_BEFORE_MIN} minutes before 1:00 PM, then this app will clock you back in
-                  automatically at 1:00 PM — or end the day now if you're not coming back for the Afternoon.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="clock-label live">
-                  <span className="live-dot" /> On duty · {SEGMENT_LABEL[activeSession.phase]} ·{" "}
-                  {categoryLabel(activeSession.category)} · {clientName(activeSession.client)}
-                </div>
-                <div className="clock-digits">{formatDuration(elapsedMsSince(activeSession.segStartedAt))}</div>
-                <div className="clock-controls">
-                  <input
-                    type="text"
-                    placeholder="What are you working on? (optional)"
-                    value={sessionNote}
-                    onChange={(e) => setSessionNote(e.target.value)}
-                  />
-                  <button className="clock-out-btn" onClick={clockOut}>
-                    <Square size={14} /> Clock out
-                  </button>
-                </div>
-                <p className="clock-hint">
-                  {activeSession.autoManage
-                    ? `Started at ${formatTime12(activeSession.segStart)} on ${formatDateLong(activeSession.date)}. ${
-                        activeSession.phase === "am"
-                          ? "Auto lunch-out at 12:00 PM."
-                          : activeSession.phase === "pm"
-                          ? `Auto clock-out at ${formatTime12(dayEndTimeFor(activeSession.client))}.`
-                          : "Auto clock-out at 8:00 PM."
-                      }`
-                    : `Started at ${formatTime12(activeSession.segStart)} on ${formatDateLong(activeSession.date)}. Overtime runs until you clock out.`}
-                </p>
-              </>
-            )}
           </div>
         </section>
 
@@ -1708,7 +1340,7 @@ export default function LogbookPage() {
             </div>
 
             {entries.length === 0 && (
-              <div className="empty-row">No entries yet — clock in above or add a day manually below.</div>
+              <div className="empty-row">No entries yet — add a day below to get started.</div>
             )}
 
             {entries.length > 0 && ledgerEntries.length === 0 && (
@@ -1991,9 +1623,7 @@ export default function LogbookPage() {
                   disabled={exporting || blockingExport}
                   title={
                     blockingExport
-                      ? activeSession
-                        ? "You're currently clocked in — clock out first to export a report."
-                        : "Today's shift is still in progress against the clock — the report will be available once it finishes."
+                      ? "Today's shift is still in progress against the clock — the report will be available once it finishes."
                       : undefined
                   }
                 >
@@ -2002,9 +1632,7 @@ export default function LogbookPage() {
               </div>
               {blockingExport && (
                 <span className="export-blocked-note">
-                  {activeSession
-                    ? "You're clocked in right now — clock out to unlock report export."
-                    : "A logged shift for today hasn't reached its scheduled end time yet — report export unlocks once it does."}
+                  A logged shift for today hasn't reached its scheduled end time yet — report export unlocks once it does.
                 </span>
               )}
               <span className="save-note">

@@ -1,15 +1,13 @@
 // Real-time progress engine.
 //
 // The rest of the app treats a logbook entry's `hours` field as already
-// "banked" the instant it's saved — which is correct for entries produced
-// by the live Clock in/out flow (saveSegment() only ever writes a segment
-// once its scheduled end has actually been reached, or the trainee clocked
-// out at that literal moment). It is NOT correct for entries added by hand
-// through "Add day": someone can pick a shift coverage (Whole day / Morning
-// only / Afternoon → Evening …) for TODAY and fill in times that haven't
-// happened yet (e.g. it's 7:59 AM and they add an 8:00 AM–5:00 PM day) —
-// the raw `hours` field would already say "8h", even though none of that
-// has actually elapsed.
+// "banked" the instant it's saved — which would only be correct if every
+// entry were guaranteed to already be in the past. It is NOT correct for
+// entries added by hand through "Add day": someone can pick a shift
+// coverage (Whole day / Morning only / Afternoon → Evening …) for TODAY
+// and fill in times that haven't happened yet (e.g. it's 7:59 AM and they
+// add an 8:00 AM–5:00 PM day) — the raw `hours` field would already say
+// "8h", even though none of that has actually elapsed.
 //
 // This module re-derives, from the wall clock, how much of any entry's
 // scheduled segments have *actually* elapsed right now — the same

@@ -95,12 +95,10 @@
 }
 .signout-btn:hover { color: var(--danger); border-color: var(--rust); }
 
-/* ---------- Hero: ring + live clock ---------- */
+/* ---------- Hero: progress ring ---------- */
 .duty-hero {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 26px;
-  align-items: center;
+  display: flex;
+  justify-content: center;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -119,7 +117,6 @@
 .ring-tick { stroke: var(--paper); stroke-width: 2; opacity: 0.7; }
 .ring-tick.major { stroke: var(--paper); stroke-width: 2.4; opacity: 0.9; }
 .ring-progress { fill: none; stroke: var(--teal); transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease; }
-.duty-ring.is-live .ring-progress { filter: drop-shadow(0 0 5px rgba(31, 122, 92, 0.5)); }
 .duty-ring.is-complete .ring-progress { filter: drop-shadow(0 0 6px rgba(31, 122, 92, 0.55)); }
 
 .ring-center {
@@ -150,42 +147,6 @@
 .remaining-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 .ot-chip { background: var(--rust-soft); color: var(--rust); padding: 2px 8px; border-radius: 999px; font-weight: 600; }
 
-.hero-clock { display: flex; flex-direction: column; gap: 10px; }
-.clock-label { font-size: 13px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
-.clock-label.live { color: var(--teal); }
-.clock-label.lunch { color: var(--brass); }
-.live-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--teal);
-  animation: pulse 1.4s infinite;
-}
-.live-dot.lunch-dot { background: var(--brass); }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-
-.clock-digits {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 40px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-.clock-digits--lunch {
-  font-family: inherit;
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--brass);
-  letter-spacing: 0;
-}
-
-.clock-controls { display: flex; gap: 8px; flex-wrap: wrap; }
-.clock-controls select, .clock-controls input {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 9px 10px;
-  font-size: 13px;
-  background: var(--paper);
-  color: var(--ink);
-}
-.clock-controls input[type="text"] { flex: 1; min-width: 160px; }
-
 /* ---------- Selects: consistent size + custom arrow everywhere ----------
    Native <select> menus render with the OS/browser's own dropdown list — that
    part can't be restyled — but the closed control itself was inconsistent in
@@ -201,22 +162,6 @@ select {
   padding-right: 26px !important;
   max-width: 100%;
 }
-
-.clock-in-btn, .clock-out-btn {
-  display: flex; align-items: center; gap: 6px;
-  border: none;
-  border-radius: 8px;
-  padding: 9px 16px;
-  font-size: 13.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.clock-in-btn { background: var(--teal); color: #fff; }
-.clock-in-btn:hover { background: #185f49; }
-.clock-out-btn { background: var(--rust); color: #fff; }
-.clock-out-btn:hover { background: #9c3324; }
-
-.clock-hint { font-size: 11.5px; color: var(--ink-soft); margin: 0; }
 
 /* ---------- Setup row ---------- */
 .duty-setup {
@@ -875,9 +820,7 @@ select {
 
 /* ---------- Responsive: phones (landscape phablets down to hero stacking) ---------- */
 @media (max-width: 720px) {
-  .duty-hero { grid-template-columns: 1fr; text-align: center; padding: 20px; }
-  .hero-clock { align-items: center; }
-  .clock-controls { justify-content: center; }
+  .duty-hero { padding: 20px; }
   .duty-setup { grid-template-columns: 1fr; padding: 16px; }
   .reports-grid { grid-template-columns: 1fr; }
   .ledger-new-grid.secondary > .new-field { flex-basis: 100%; }
@@ -915,8 +858,6 @@ select {
 
   /* iOS Safari auto-zooms into any input/select under 16px on focus — this
      keeps every field at 16px on phones so tapping in doesn't jump-zoom. */
-  .clock-controls select,
-  .clock-controls input,
   .setup-field input,
   .client-name-input,
   .new-field input,
@@ -944,7 +885,6 @@ select {
   .signout-btn { padding: 8px 10px; }
   .topbar-actions { gap: 6px; }
 
-  .clock-digits { font-size: 32px; }
   .ring-hours { font-size: 20px; }
 
   .ledger-card, .reports-card { padding: 14px; border-radius: 14px; }

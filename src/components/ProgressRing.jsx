@@ -6,12 +6,12 @@ const R = (SIZE - STROKE) / 2;
 const CIRC = 2 * Math.PI * R;
 const TICKS = 24;
 
-export default function ProgressRing({ percent = 0, complete = false, live = false, children }) {
+export default function ProgressRing({ percent = 0, complete = false, children }) {
   const clamped = Math.min(Math.max(percent, 0), 100);
   const offset = CIRC - (clamped / 100) * CIRC;
 
   return (
-    <div className={`duty-ring${complete ? " is-complete" : ""}${live ? " is-live" : ""}`}>
+    <div className={`duty-ring${complete ? " is-complete" : ""}`}>
       <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
         <circle className="ring-track" cx={SIZE / 2} cy={SIZE / 2} r={R} strokeWidth={STROKE} />
         {Array.from({ length: TICKS }).map((_, i) => {
