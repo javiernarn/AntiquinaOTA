@@ -22,7 +22,6 @@ import { getToken, onMessage } from "firebase/messaging";
 import { auth, db, firebaseEnabled, getMessagingIfSupported, VAPID_KEY } from "../firebase";
 
 let currentUid = null;
-let currentDeviceToken = null;
 let authReadyResolve;
 const authReady = new Promise((resolve) => {
   authReadyResolve = resolve;
@@ -66,39 +65,10 @@ export async function signInToCloud(idToken) {
   }
 }
 
-// Fully signs the device out of the cloud side: deregisters this
-// browser's push token from the account that's signing out (so this
-// device stops receiving THAT account's reminders), then ends the
-// Firebase Auth session.
-//
-// The deregister step has to happen BEFORE firebaseSignOut() — once
-// signed out, Firestore security rules will reject a delete against
-// users/{uid}/devices/{token} because request.auth no longer matches
-// that uid. Skipping this order (or skipping this step entirely, as the
-// old code did) is exactly what let a phone keep receiving a previous
-// account's reminders after switching to a different Google account on
-// the same device: FCM tokens belong to the browser + service worker,
-// not to whichever account happens to be signed in, so an old token left
-// registered under the old account just... keeps working.
-export async function signOutOfCloud() {
+export function signOutOfCloud() {
   if (!firebaseEnabled) return;
-  const uid = uidOrNull();
-  if (uid && currentDeviceToken) {
-    try {
-      await deleteDoc(doc(db, "users", uid, "devices", currentDeviceToken));
-    } catch (e) {
-      // Non-fatal — proceed with sign-out either way. Worst case, a
-      // human clears it later, or removeDeviceToken's FCM-side cleanup
-      // (invalid-token pruning in reminderScan.js) catches it eventually.
-    }
-  }
-  try {
-    await firebaseSignOut(auth);
-  } catch (e) {
-    // ignore
-  }
+  firebaseSignOut(auth).catch(() => {});
   currentUid = null;
-  currentDeviceToken = null;
 }
 
 function uidOrNull() {
@@ -143,7 +113,6 @@ export async function registerDeviceForPush() {
       serviceWorkerRegistration: registration,
     });
     if (!token) return "denied";
-    currentDeviceToken = token;
 
     await setDoc(
       doc(db, "users", uid, "devices", token),
