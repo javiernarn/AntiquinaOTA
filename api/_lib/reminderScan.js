@@ -115,7 +115,7 @@ function inWindow(nowMin, atMin, beforeMin) {
 // a custom 1:00 PM–8:00 PM host) simply skips the two lunch checkpoints,
 // matching how clientCoverage()/dailyHoursFor() in src/utils/schedule.js
 // already reason about "does this client's day span lunch".
-function checkpointsForClient(client) {
+function checkpointsForClient(client, wd) {
   const inMin = toMinutes(client.timeIn);
   const outMin = toMinutes(client.timeOut);
   if (inMin === null || outMin === null || outMin <= inMin) return [];
@@ -156,14 +156,29 @@ function checkpointsForClient(client) {
   }
 
   const endLabel = segmentLabel(outMin, false);
+  // Whether the client has duty tomorrow decides the tone/content of the
+  // closing line: a mid-week day close reminds them to add tomorrow's
+  // entry; the last scheduled day of their week (e.g. Friday for a
+  // Mon–Fri client) instead congratulates them on the week, since there's
+  // nothing to remind them about tomorrow. The app auto-fills the clock-out
+  // time itself, so there's no "don't forget to clock out" action needed —
+  // this is purely an encouraging heads-up, not a task reminder.
+  const tomorrowWd = wd === 7 ? 1 : wd + 1;
+  const hasDutyTomorrow = Array.isArray(client.days) && client.days.includes(tomorrowWd);
   checkpoints.push({
     flagKey: "dayEnd",
     atMin: outMin,
     beforeMin: DAY_END_BEFORE_MIN,
-    build: (left) => ({
-      title: `Your ${endLabel} will end soon`,
-      body: `${client.name} ends at ${formatTime12(client.timeOut)} — about ${minsLeftLabel(left)} left. Don't forget to clock out.`,
-    }),
+    build: (left) =>
+      hasDutyTomorrow
+        ? {
+            title: "Almost done for today!",
+            body: `${client.name} — ${endLabel} in about ${minsLeftLabel(left)} (${formatTime12(client.timeOut)}). Great work today — enjoy your rest, and don't forget to add tomorrow's day when your shift starts.`,
+          }
+        : {
+            title: "You made it through the week!",
+            body: `${client.name} — ${endLabel} in about ${minsLeftLabel(left)} (${formatTime12(client.timeOut)}). You've done well this week — congrats! Enjoy your rest, no duty tomorrow.`,
+          },
   });
 
   return checkpoints;
@@ -176,7 +191,7 @@ function pickReminders({ clients, lastClientId, nowMin, wd, alreadySent }) {
   if (!client || !Array.isArray(client.days) || !client.days.includes(wd)) return [];
 
   const due = [];
-  for (const cp of checkpointsForClient(client)) {
+  for (const cp of checkpointsForClient(client, wd)) {
     if (alreadySent[cp.flagKey]) continue;
     if (!inWindow(nowMin, cp.atMin, cp.beforeMin)) continue;
     const left = Math.max(1, cp.atMin - nowMin);

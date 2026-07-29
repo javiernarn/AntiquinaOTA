@@ -819,7 +819,7 @@ export default function LogbookPage() {
   }
 
   function handleSignOut() {
-    logout();
+    logout({ cloud: true });
     navigate("/login", { replace: true });
   }
 

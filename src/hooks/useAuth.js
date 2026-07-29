@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getStorage, setStorage, removeStorage } from "../utils/storage";
+import { signOutOfCloud } from "../utils/cloudSync";
 
 const SESSION_KEY = "session";
 
@@ -28,7 +29,14 @@ export function useAuth() {
     setUser(session);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback((opts = {}) => {
+    if (opts.cloud) {
+      // Explicit sign-out (the Sign Out button) — also deregister this
+      // device from the account so a different account signed into
+      // later on this same phone doesn't inherit its reminders. See
+      // cloudSync.js's signOutOfCloud() for why the ordering matters.
+      signOutOfCloud().catch(() => {});
+    }
     removeStorage(SESSION_KEY);
     setUser(null);
   }, []);
