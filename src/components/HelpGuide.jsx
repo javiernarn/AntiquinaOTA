@@ -82,6 +82,14 @@ function GuideContent() {
         <h3><Bell size={14} /> 5. Notifications</h3>
         <ul>
           <li>The bell icon logs every milestone (25%/50%/75%/100% of your required hours), a heads-up before your shift's scheduled start time, and warnings (e.g. browser storage issues).</li>
+          <li>Reminder heads-ups go out shortly before each checkpoint in your day:
+            <ul>
+              <li><strong>Day start</strong> — about 10 minutes before your Morning/Afternoon/Evening time in</li>
+              <li><strong>Lunch out</strong> — about 10 minutes before 12:00 PM</li>
+              <li><strong>Lunch in</strong> — about 5 minutes before 1:00 PM</li>
+              <li><strong>Day end</strong> — about 10 minutes before your scheduled clock-out</li>
+            </ul>
+          </li>
           <li>Tap <strong>"Turn on desktop alerts"</strong> in the panel to also get OS-level notifications even when this tab isn't focused.</li>
         </ul>
       </section>
