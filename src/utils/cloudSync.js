@@ -85,7 +85,7 @@ export async function signOutOfCloud() {
   const uid = uidOrNull();
   if (uid && currentDeviceToken) {
     try {
-      await deleteDoc(doc(db, "users", uid, "devices", currentDeviceToken));
+      await deleteDoc(doc(db, "users", uid, "devices", getOrCreateDeviceId()));
     } catch (e) {
       // Non-fatal — proceed with sign-out either way. Worst case, a
       // human clears it later, or removeDeviceToken's FCM-side cleanup
@@ -105,12 +105,42 @@ function uidOrNull() {
   return currentUid || auth?.currentUser?.uid || null;
 }
 
+// FCM tokens rotate over time (browser cache clears, PWA reinstalls, OS
+// updates, etc). If we keyed each device's Firestore doc by the token
+// itself, every rotation would leave the OLD token doc behind — still
+// valid, still receiving pushes — while a new doc got created for the
+// new token. Over months that silently piles up several live tokens for
+// the SAME physical device, and reminderScan.js's sendToUser() (which
+// pushes to every token it finds) ends up firing the same reminder 2-4x
+// on one phone.
+//
+// To prevent that, each browser gets ONE stable, locally-generated device
+// id (persisted in localStorage) that's used as the Firestore doc id
+// instead of the token. Re-registering — even with a brand-new token —
+// just overwrites that same doc rather than creating a new one.
+const DEVICE_ID_KEY = "occ-push-device-id";
+function getOrCreateDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) || `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    // localStorage unavailable (private mode, etc) — fall back to an
+    // in-memory id; worst case this tab re-registers as "new" next load.
+    return `dev-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
 // --- Device / push token registration ----------------------------------
 // Registers this browser tab's service worker for FCM, requests
 // Notification permission if needed, and stores the resulting token under
-// users/{uid}/devices/{token} so the scheduler knows where to push.
-// Safe to call every time the app loads — re-registering the same token
-// is a harmless no-op write.
+// users/{uid}/devices/{deviceId} (a stable per-browser id, NOT the token
+// itself — see getOrCreateDeviceId() above) so the scheduler knows where
+// to push. Safe to call every time the app loads — re-registering just
+// overwrites this device's one doc.
 export async function registerDeviceForPush() {
   if (!firebaseEnabled) return "unsupported";
   const uid = uidOrNull() || (await waitForAuthReady());
@@ -144,9 +174,10 @@ export async function registerDeviceForPush() {
     });
     if (!token) return "denied";
     currentDeviceToken = token;
+    const deviceId = getOrCreateDeviceId();
 
     await setDoc(
-      doc(db, "users", uid, "devices", token),
+      doc(db, "users", uid, "devices", deviceId),
       {
         token,
         platform: navigator.platform || "web",

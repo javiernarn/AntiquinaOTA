@@ -210,11 +210,24 @@ function getAdminApp() {
 
 async function sendToUser(db, messaging, uid, reminder) {
   const devicesSnap = await db.collection("users").doc(uid).collection("devices").get();
-  const tokens = devicesSnap.docs.map((d) => d.id);
-  if (!tokens.length) return;
+  // Doc id is a stable per-browser device id (see getOrCreateDeviceId() in
+  // cloudSync.js) — NOT the FCM token, which rotates. The actual token
+  // lives in the doc's `token` field. Dedupe by token too, as a
+  // belt-and-suspenders guard against any device docs left over from
+  // before this change (which were keyed by token and would otherwise
+  // still be able to duplicate a send alongside the new-style doc).
+  const seenTokens = new Set();
+  const entries = [];
+  for (const d of devicesSnap.docs) {
+    const token = d.data()?.token || d.id;
+    if (!token || seenTokens.has(token)) continue;
+    seenTokens.add(token);
+    entries.push({ ref: d.ref, token });
+  }
+  if (!entries.length) return;
 
   const resp = await messaging.sendEachForMulticast({
-    tokens,
+    tokens: entries.map((e) => e.token),
     notification: { title: reminder.title, body: reminder.body },
     data: { tag: reminder.flagKey, url: "/logbook" },
     webpush: { fcmOptions: { link: "/logbook" } },
@@ -227,7 +240,7 @@ async function sendToUser(db, messaging, uid, reminder) {
         (r.error?.code === "messaging/registration-token-not-registered" ||
           r.error?.code === "messaging/invalid-registration-token");
       if (!badToken) return null;
-      return db.collection("users").doc(uid).collection("devices").doc(tokens[i]).delete().catch(() => {});
+      return entries[i].ref.delete().catch(() => {});
     })
   );
 }
