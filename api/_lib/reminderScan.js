@@ -210,11 +210,24 @@ function getAdminApp() {
 
 async function sendToUser(db, messaging, uid, reminder) {
   const devicesSnap = await db.collection("users").doc(uid).collection("devices").get();
-  const tokens = devicesSnap.docs.map((d) => d.id);
-  if (!tokens.length) return;
+  // Doc id is a stable per-browser device id (see getOrCreateDeviceId() in
+  // cloudSync.js) — NOT the FCM token, which rotates. The actual token
+  // lives in the doc's `token` field. Dedupe by token too, as a
+  // belt-and-suspenders guard against any device docs left over from
+  // before this change (which were keyed by token and would otherwise
+  // still be able to duplicate a send alongside the new-style doc).
+  const seenTokens = new Set();
+  const entries = [];
+  for (const d of devicesSnap.docs) {
+    const token = d.data()?.token || d.id;
+    if (!token || seenTokens.has(token)) continue;
+    seenTokens.add(token);
+    entries.push({ ref: d.ref, token });
+  }
+  if (!entries.length) return;
 
   const resp = await messaging.sendEachForMulticast({
-    tokens,
+    tokens: entries.map((e) => e.token),
     notification: { title: reminder.title, body: reminder.body },
     data: { tag: reminder.flagKey, url: "/logbook" },
     webpush: { fcmOptions: { link: "/logbook" } },
@@ -227,9 +240,33 @@ async function sendToUser(db, messaging, uid, reminder) {
         (r.error?.code === "messaging/registration-token-not-registered" ||
           r.error?.code === "messaging/invalid-registration-token");
       if (!badToken) return null;
-      return db.collection("users").doc(uid).collection("devices").doc(tokens[i]).delete().catch(() => {});
+      return entries[i].ref.delete().catch(() => {});
     })
   );
+}
+
+// Atomically "claims" one checkpoint for one user/day. Returns true only
+// if THIS call is the one that gets to send it — if another (possibly
+// overlapping/concurrent) invocation of runReminderScan already claimed
+// it, this returns false and nothing is sent again.
+//
+// This matters because the free cron service that hits
+// /api/send-reminders can end up calling it more than once around the
+// same moment (a slow response triggering a retry, more than one
+// scheduler configured, etc). Reading notifyState and writing "sent" as
+// two separate steps left a window where every overlapping call would
+// see "not sent yet" and all send — producing the same reminder
+// duplicated on the one device every time. A transaction closes that
+// window: only one caller's write can win for a given flagKey.
+async function claimReminder(db, uid, today, flagKey) {
+  const ref = db.collection("users").doc(uid).collection("notifyState").doc(today);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() : {};
+    if (data[flagKey]) return false;
+    tx.set(ref, { [flagKey]: true }, { merge: true });
+    return true;
+  });
 }
 
 export async function runReminderScan() {
@@ -266,7 +303,11 @@ export async function runReminderScan() {
       if (!reminders.length) return;
 
       for (const reminder of reminders) {
-        await notifyStateRef.set({ [reminder.flagKey]: true }, { merge: true });
+        // alreadySent (read above) is just a cheap early-out. The
+        // transaction below is what actually prevents a duplicate send
+        // when two invocations race each other.
+        const claimed = await claimReminder(db, uid, today, reminder.flagKey);
+        if (!claimed) continue;
         await sendToUser(db, messaging, uid, reminder);
         sent++;
       }
