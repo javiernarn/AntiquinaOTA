@@ -226,11 +226,33 @@ async function sendToUser(db, messaging, uid, reminder) {
   }
   if (!entries.length) return;
 
+  // Every checkpoint here is time-sensitive by nature (it's built around a
+  // "T-minus N minutes" window). Left at FCM's defaults, a web push has
+  // normal priority and can sit queued for hours — even the default's
+  // multi-week TTL — if the recipient's phone/browser was asleep, offline,
+  // or in a battery-saver doze state at the moment this ran. That's what
+  // let a Friday "day ended, no duty tomorrow" reminder actually surface
+  // on the phone on *Saturday*: correct content, correct day it was
+  // generated for, just delivered stale after the window it was relevant
+  // for had already passed — which looks indistinguishable from "a
+  // reminder fired for a day I never scheduled."
+  //
+  // Fixing that isn't about resending faster — it's about making a late
+  // delivery impossible: Urgency: "high" asks the push service to wake the
+  // device immediately rather than batching, and a short TTL means if it
+  // still can't be delivered inside that window, the push service drops it
+  // instead of holding onto it and delivering it stale later. A silently
+  // dropped reminder is correct behavior here; a stale one delivered a day
+  // late is not.
+  const TTL_SECONDS = 15 * 60; // covers the widest checkpoint window (10 + grace) with headroom
   const resp = await messaging.sendEachForMulticast({
     tokens: entries.map((e) => e.token),
     notification: { title: reminder.title, body: reminder.body },
     data: { tag: reminder.flagKey, url: "/logbook" },
-    webpush: { fcmOptions: { link: "/logbook" } },
+    webpush: {
+      fcmOptions: { link: "/logbook" },
+      headers: { Urgency: "high", TTL: String(TTL_SECONDS) },
+    },
   });
 
   await Promise.all(
